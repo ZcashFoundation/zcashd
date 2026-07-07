@@ -1,0 +1,117 @@
+name: Publish valaroman zcashd Docker image
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to checkout before building. If this is a release tag and image_tag is unset, it is also used as the Docker tag."
+        required: false
+      image_tag:
+        description: "Docker tag to publish. Defaults to the release tag for releases, a supplied release ref for manual runs, or commit-<sha>."
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-valaroman-zcashd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish zcashd image
+    runs-on: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Resolve Docker tags
+        id: tags
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$INPUT_IMAGE_TAG" ]; then
+            tags=("valaroman/zcashd:${INPUT_IMAGE_TAG}")
+          elif [ "$EVENT_NAME" = "release" ]; then
+            if [ -z "$RELEASE_TAG" ]; then
+              echo "Unable to resolve release tag." >&2
+              exit 1
+            fi
+
+            tags=("valaroman/zcashd:${RELEASE_TAG}")
+            if [[ "$RELEASE_TAG" == v* ]]; then
+              tags+=("valaroman/zcashd:${RELEASE_TAG#v}")
+            fi
+          else
+            REF_TAG="${INPUT_REF#refs/tags/}"
+            if [[ -n "$INPUT_REF" && "$REF_TAG" == v* ]]; then
+              tags=("valaroman/zcashd:${REF_TAG}")
+              tags+=("valaroman/zcashd:${REF_TAG#v}")
+            else
+              tags=("valaroman/zcashd:commit-${GITHUB_SHA}")
+            fi
+          fi
+
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          printf 'Publishing Docker tags:\n'
+          printf '  %s\n' "${tags[@]}"
+
+      - name: Build zcashd
+        shell: bash
+        run: ./zcutil/build.sh -j"$(nproc)"
+
+      - name: Prepare Docker build context
+        shell: bash
+        env:
+          DOCKER_CONTEXT: ${{ runner.temp }}/zcashd-docker-context
+        run: |
+          set -euo pipefail
+          rm -rf "$DOCKER_CONTEXT"
+          mkdir -p "$DOCKER_CONTEXT"
+
+          cp \
+            ./src/zcashd \
+            ./src/zcash-cli \
+            ./src/zcash-tx \
+            ./src/zcashd-wallet-tool \
+            ./zcutil/fetch-params.sh \
+            ./contrib/docker/entrypoint.sh \
+            "$DOCKER_CONTEXT/"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push to valaroman
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: ${{ runner.temp }}/zcashd-docker-context
+          file: ./contrib/docker/source-runtime.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}

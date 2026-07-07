@@ -739,6 +739,10 @@ libzcash_script_la_SOURCES = \
   uint256.cpp
 
 libzcash_script_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
+if TARGET_WINDOWS
+# Rust staticlibs may contain duplicate PE/COFF import stubs for Windows DLLs.
+libzcash_script_la_LDFLAGS += -Wl,--allow-multiple-definition
+endif
 libzcash_script_la_LIBADD = $(LIBRUSTZCASH) $(LIBSECP256K1)
 libzcash_script_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/rust/include -I$(srcdir)/rust/gen/include -I$(srcdir)/secp256k1/include -DBUILD_BITCOIN_INTERNAL
 libzcash_script_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)

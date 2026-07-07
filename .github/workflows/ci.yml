@@ -37,8 +37,8 @@ jobs:
             - name: Debian-bookworm
               tier: 1
               platform: Debian Bookworm
-              build_os: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
-              test_os: ubuntu-latest
+              build_os: ${{ vars.UBUNTU_LARGE_RUNNER_2204 || 'ubuntu-22.04' }}
+              test_os: ubuntu-22.04
               container: electriccoinco/debian-helper:bookworm
               host: x86_64-pc-linux-gnu
 
@@ -445,7 +445,10 @@ jobs:
     continue-on-error: ${{ matrix.tier != 1 }}
     strategy:
       matrix:
-        include: ${{ fromJson(needs.setup.outputs.test_matrix) }}
+        # Standalone `cargo test` does not link the C++ objects from the
+        # zcashd build, so the native Windows linker cannot resolve CXX
+        # bridge symbols that are provided by zcashd.
+        include: ${{ fromJson(needs.setup.outputs.unix_test_matrix) }}
 
     steps:
       - uses: actions/checkout@v6.0.3

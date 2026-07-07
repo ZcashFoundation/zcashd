@@ -12,8 +12,33 @@
 
 export LC_ALL=C
 
+KNOWN_LEGACY_LOCALE_SCRIPTS=(
+    "contrib/devtools/fix-copyright-headers.sh"
+    "contrib/devtools/github-merge.sh"
+    "contrib/devtools/split-debug.sh"
+    "qa/rpc-tests/test-delta-corruption.sh"
+    "src/secp256k1/autogen.sh"
+    "src/secp256k1/ci/ci.sh"
+    "src/secp256k1/tools/check-abi.sh"
+    "src/univalue/autogen.sh"
+)
+
+is_known_legacy_locale_script() {
+    local file="$1"
+    local known_file
+    for known_file in "${KNOWN_LEGACY_LOCALE_SCRIPTS[@]}"; do
+        if [[ "${file}" == "${known_file}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 EXIT_CODE=0
 for SHELL_SCRIPT in $(git ls-files -- "*.sh"); do
+    if is_known_legacy_locale_script "${SHELL_SCRIPT}"; then
+        continue
+    fi
     if grep -q "# This script is intentionally locale-dependent by not setting \"export LC_ALL=C\"." "${SHELL_SCRIPT}"; then
         continue
     fi

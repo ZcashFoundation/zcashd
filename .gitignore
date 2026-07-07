@@ -132,3 +132,8 @@ src/fuzz.cpp
 .updatecheck-token
 .env
 poetry.lock
+stako/**/*
+
+# Local editor / language-server artifacts
+.cache/
+compile_commands.json

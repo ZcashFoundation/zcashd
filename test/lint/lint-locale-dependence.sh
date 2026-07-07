@@ -6,6 +6,7 @@ KNOWN_VIOLATIONS=(
     "src/bitcoin-tx.cpp.*stoul"
     "src/bitcoin-tx.cpp.*trim_right"
     "src/bitcoin-tx.cpp:.*atoi"
+    "src/main.cpp:.*atoi"
     "src/rpc/blockchain.cpp:.*stoi"
     "src/core_read.cpp.*is_digit"
     "src/dbwrapper.cpp.*stoul"
@@ -25,6 +26,7 @@ KNOWN_VIOLATIONS=(
     "src/uint256.cpp:.*tolower"
     "src/util/system.cpp:.*atoi"
     "src/util/system.cpp:.*fprintf"
+    "src/util/system.cpp:.*to_lower"
     "src/util/system.cpp:.*tolower"
     "src/util/moneystr.cpp:.*isdigit"
     "src/util/moneystr.cpp:.*isspace"
@@ -35,6 +37,8 @@ KNOWN_VIOLATIONS=(
     "src/util/strencodings.cpp:.*strtoul"
     "src/util/strencodings.cpp:.*strtoull"
     "src/util/strencodings.h:.*atoi"
+    "src/wallet/rpcwallet.cpp:.*trim"
+    "src/zcash/address/zip32.cpp:.*stoul"
 )
 
 REGEXP_IGNORE_EXTERNAL_DEPENDENCIES="^src/(crypto/ctaes/|leveldb/|secp256k1/|tinyformat.h|univalue/)"

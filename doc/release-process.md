@@ -234,6 +234,24 @@ particular, GitHub needs the corresponding public key to be uploaded to a
 corresponding GitHub account. If this release is marked as "Unverified", click
 the marking to see what GitHub wants to be done.
 
+## Publish zcashd compatibility artifacts
+
+For releases that need Zebra-managed `zcashd` compatibility downloads, publish
+the compatibility artifacts to the same GitHub release tag:
+
+- Trigger `.github/workflows/release-zcashd-compat-assets.yml` (or rely on the
+  automatic release trigger).
+- Ensure the workflow publishes:
+  - stripped runtime archives (`zcashd-zebra-compat-<tag>-<platform>.tar.gz`);
+  - debug symbol archives (`...-debug.tar.gz`);
+  - `SHA256SUMS.txt`;
+  - `zcashd-zebra-compat-manifest-<tag>.json`.
+- Verify the manifest and checksums before announcing the release.
+
+Version changes for these assets should continue to flow through
+`./zcutil/make-release.py`, which updates the release-related version metadata
+across the tree.
+
 ## Post Release Task List
 
 ### Merge the release stabilization branch
