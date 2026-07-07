@@ -982,6 +982,10 @@ public:
         fZIP209Enabled = true;
     }
 
+    void SetRegTestAcceptUnvalidatedPow() {
+        consensus.fAcceptUnvalidatedPoW = true;
+    }
+
     void SetRegTestAllowLegacyChainSupplyData() {
         fRegTestAllowLegacyChainSupplyData = true;
     }
@@ -1051,6 +1055,12 @@ void SelectParams(const std::string& network)
     // Enable ZIP 209 enforcement without zeroing shielded pool balances.
     if (network == CBaseChainParams::REGTEST && mapArgs.count("-regtestenablezip209")) {
         regTestParams.SetRegTestZIP209Enabled();
+    }
+
+    // Accept headers without Equihash/PoW validation when following a Zebra
+    // regtest chain, whose mined blocks carry null solutions.
+    if (network == CBaseChainParams::REGTEST && mapArgs.count("-regtestacceptunvalidatedpow")) {
+        regTestParams.SetRegTestAcceptUnvalidatedPow();
     }
 }
 

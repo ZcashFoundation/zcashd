@@ -506,6 +506,12 @@ struct Params {
     int64_t nPreBlossomPowTargetSpacing;
     int64_t nPostBlossomPowTargetSpacing;
 
+    /** Regtest-only (`-regtestacceptunvalidatedpow`): accept block headers
+     *  without validating the Equihash solution or the proof-of-work hash
+     *  target. Zebra skips proof-of-work on regtest, so blocks it mines carry
+     *  null solutions that stock validation would reject. */
+    bool fAcceptUnvalidatedPoW = false;
+
     int64_t PoWTargetSpacing(int nHeight) const;
     int64_t AveragingWindowTimespan(int nHeight) const;
     int64_t MinActualTimespan(int nHeight) const;

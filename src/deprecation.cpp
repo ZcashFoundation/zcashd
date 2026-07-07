@@ -46,6 +46,11 @@ void EnforceNodeDeprecation(const CChainParams& params, int nHeight, bool forceL
 
     int blocksToDeprecation = DEPRECATION_HEIGHT - nHeight;
     if (blocksToDeprecation <= 0) {
+        // This build runs as a P2P sidecar behind a Zebra node, which performs
+        // consensus validation; the upstream end-of-support auto-shutdown is
+        // disabled so the sidecar keeps serving its wallet/RPC surface past the
+        // upstream deprecation height. Warn instead of shutting down.
+        //
         // In order to ensure we only log once per process when deprecation is
         // disabled (to avoid log spam), we only need to log in two cases:
         // - The deprecating block just arrived
@@ -53,14 +58,12 @@ void EnforceNodeDeprecation(const CChainParams& params, int nHeight, bool forceL
         //     occurs, but that's an irregular event that won't cause spam.
         // - The node is starting
         if (blocksToDeprecation == 0 || forceLogging) {
-            auto msg = strprintf(_("This version has been deprecated as of block height %d."),
-                                 DEPRECATION_HEIGHT) + " " +
-                       _("You should upgrade to the latest version of Zcash.");
+            auto msg = strprintf(_("Block height %d has passed the upstream zcashd end-of-support height %d; continuing because the end-of-support halt is disabled in this build."),
+                                 nHeight, DEPRECATION_HEIGHT);
             LogPrintf("*** %s\n", msg);
             AlertNotify(msg, fThread);
-            uiInterface.ThreadSafeMessageBox(msg, "", CClientUIInterface::MSG_ERROR);
+            uiInterface.ThreadSafeMessageBox(msg, "", CClientUIInterface::MSG_WARNING);
         }
-        StartShutdown();
     } else if (blocksToDeprecation == DEPRECATION_WARN_LIMIT ||
                (blocksToDeprecation < DEPRECATION_WARN_LIMIT && forceLogging)) {
         std::string msg = strprintf(_("This version will be deprecated at block height %d, and will automatically shut down."),

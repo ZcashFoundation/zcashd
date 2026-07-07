@@ -106,6 +106,10 @@ unsigned int CalculateNextWorkRequired(arith_uint256 bnAvg,
 
 bool CheckEquihashSolution(const CBlockHeader *pblock, const Consensus::Params& params)
 {
+    // Regtest-only: Zebra-mined regtest blocks carry null Equihash solutions.
+    if (params.fAcceptUnvalidatedPoW)
+        return true;
+
     unsigned int n = params.nEquihashN;
     unsigned int k = params.nEquihashK;
 
@@ -124,6 +128,10 @@ bool CheckEquihashSolution(const CBlockHeader *pblock, const Consensus::Params& 
 
 bool CheckProofOfWork(uint256 hash, unsigned int nBits, const Consensus::Params& params)
 {
+    // Regtest-only: Zebra-mined regtest blocks do not meet the hash target.
+    if (params.fAcceptUnvalidatedPoW)
+        return true;
+
     bool fNegative;
     bool fOverflow;
     arith_uint256 bnTarget;

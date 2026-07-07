@@ -72,24 +72,26 @@ TEST_F(DeprecationTest, NodeNearDeprecationWarningIsRepeatedOnStartup) {
     EXPECT_FALSE(ShutdownRequested());
 }
 
-TEST_F(DeprecationTest, DeprecatedNodeShutsDown) {
+// The end-of-support halt is disabled in this build (P2P sidecar behind
+// Zebra): reaching DEPRECATION_HEIGHT warns but never requests shutdown.
+TEST_F(DeprecationTest, DeprecatedNodeKeepsRunning) {
     EXPECT_FALSE(ShutdownRequested());
-    EXPECT_CALL(mock_, ThreadSafeMessageBox(::testing::_, "", CClientUIInterface::MSG_ERROR));
+    EXPECT_CALL(mock_, ThreadSafeMessageBox(::testing::_, "", CClientUIInterface::MSG_WARNING));
     EnforceNodeDeprecation(Params(), DEPRECATION_HEIGHT);
-    EXPECT_TRUE(ShutdownRequested());
+    EXPECT_FALSE(ShutdownRequested());
 }
 
-TEST_F(DeprecationTest, DeprecatedNodeErrorIsNotDuplicated) {
+TEST_F(DeprecationTest, DeprecatedNodeWarningIsNotDuplicated) {
     EXPECT_FALSE(ShutdownRequested());
     EnforceNodeDeprecation(Params(), DEPRECATION_HEIGHT + 1);
-    EXPECT_TRUE(ShutdownRequested());
+    EXPECT_FALSE(ShutdownRequested());
 }
 
-TEST_F(DeprecationTest, DeprecatedNodeErrorIsRepeatedOnStartup) {
+TEST_F(DeprecationTest, DeprecatedNodeWarningIsRepeatedOnStartup) {
     EXPECT_FALSE(ShutdownRequested());
-    EXPECT_CALL(mock_, ThreadSafeMessageBox(::testing::_, "", CClientUIInterface::MSG_ERROR));
+    EXPECT_CALL(mock_, ThreadSafeMessageBox(::testing::_, "", CClientUIInterface::MSG_WARNING));
     EnforceNodeDeprecation(Params(), DEPRECATION_HEIGHT + 1, true);
-    EXPECT_TRUE(ShutdownRequested());
+    EXPECT_FALSE(ShutdownRequested());
 }
 
 TEST_F(DeprecationTest, DeprecatedNodeIgnoredOnRegtest) {

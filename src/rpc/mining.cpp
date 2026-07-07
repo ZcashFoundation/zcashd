@@ -1032,15 +1032,13 @@ static const CRPCCommand commands[] =
     { "mining",             "getnetworkhashps",       &getnetworkhashps,       true  },
     { "mining",             "getmininginfo",          &getmininginfo,          true  },
     { "mining",             "prioritisetransaction",  &prioritisetransaction,  true  },
-    { "mining",             "getblocktemplate",       &getblocktemplate,       true  },
-    { "mining",             "submitblock",            &submitblock,            true  },
     { "mining",             "getblocksubsidy",        &getblocksubsidy,        true  },
 
-#ifdef ENABLE_MINING
-    { "generating",         "getgenerate",            &getgenerate,            true  },
-    { "generating",         "setgenerate",            &setgenerate,            true  },
-    { "generating",         "generate",               &generate,               true  },
-#endif
+    // getblocktemplate, submitblock, and the generating commands
+    // (getgenerate/setgenerate/generate) are intentionally not registered:
+    // this build runs as a P2P sidecar behind a Zebra node, which is the
+    // canonical source of block templates. Miners must use Zebra's RPC.
+    // Unregistered methods return RPC_METHOD_NOT_FOUND.
 };
 
 void RegisterMiningRPCCommands(CRPCTable &tableRPC)
