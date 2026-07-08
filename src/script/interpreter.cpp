@@ -1190,7 +1190,15 @@ void PrecomputedTransactionData::SetPrecomputed(
 SigVersion SignatureHashVersion(const CTransaction& txTo)
 {
     if (txTo.fOverwintered) {
-        if (txTo.nVersionGroupId == ZIP225_VERSION_GROUP_ID) {
+        // v5 (ZIP 225) and v6 (ZIP 248 / NU6.3 Ironwood) both use the ZIP 244
+        // signature digest. For v6 the digest additionally commits to the
+        // Ironwood bundle; that is handled inside
+        // zcash_transaction_zip244_signature_digest, which dispatches on the
+        // parsed transaction version. Omitting ZIP248 here would fall through to
+        // the legacy Sapling/Overwinter sighash and compute a different digest
+        // than Zebra, forking at the first v6 transaction after NU6.3.
+        if (txTo.nVersionGroupId == ZIP225_VERSION_GROUP_ID ||
+            txTo.nVersionGroupId == ZIP248_VERSION_GROUP_ID) {
             return SIGVERSION_ZIP244;
         } else if (txTo.nVersionGroupId == SAPLING_VERSION_GROUP_ID) {
             return SIGVERSION_SAPLING;
