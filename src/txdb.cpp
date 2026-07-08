@@ -198,15 +198,23 @@ HistoryNode CCoinsViewDB::GetHistoryAt(uint32_t epochId, HistoryIndex index) con
     }
 
     if (libzcash::IsV1HistoryTree(epochId)) {
-        // History nodes serialized by `zcashd` versions that were unaware of NU5, used
-        // the previous shorter maximum serialized length. Because we stored this as an
-        // array, we can't just read the current (longer) maximum serialized length, as
-        // it will result in an exception for those older nodes.
+        // History nodes serialized by older `zcashd` versions used previous
+        // shorter maximum serialized lengths. Because we stored this as an
+        // array, we can't just read the current (longer) maximum serialized
+        // length, as it will result in an exception for those older nodes.
         //
         // Instead, we always read an array of the older length. This works as expected
         // for V1 nodes serialized by older clients, while for V1 nodes serialized by
         // NU5-aware clients this is guaranteed to ignore only trailing zero bytes.
         std::array<unsigned char, NODE_V1_SERIALIZED_LENGTH> tmpMmrNode;
+        if (!db.Read(make_pair(DB_MMR_NODE, make_pair(epochId, index)), tmpMmrNode)) {
+            throw runtime_error("History data inconsistent (expected node not found) - reindex?");
+        }
+        std::copy(std::begin(tmpMmrNode), std::end(tmpMmrNode), mmrNode.begin());
+    } else if (libzcash::IsV2HistoryTree(epochId)) {
+        // Ironwood added V3 fields and expanded HistoryNode. Existing NU5
+        // through NU6.2 chainstates contain V2 nodes with the old length.
+        std::array<unsigned char, NODE_V2_SERIALIZED_LENGTH> tmpMmrNode;
         if (!db.Read(make_pair(DB_MMR_NODE, make_pair(epochId, index)), tmpMmrNode)) {
             throw runtime_error("History data inconsistent (expected node not found) - reindex?");
         }

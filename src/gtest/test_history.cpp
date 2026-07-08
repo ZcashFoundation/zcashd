@@ -126,6 +126,39 @@ TEST(History, NewV3LeafParsesAsRustV3) {
     EXPECT_FALSE(uint256::FromRawBytes(hash).IsNull());
 }
 
+TEST(History, V2EpochsUseLegacySerializedLength) {
+    const std::array<uint32_t, 4> v2Epochs = {
+        NetworkUpgradeInfo[Consensus::UPGRADE_NU5].nBranchId,
+        NetworkUpgradeInfo[Consensus::UPGRADE_NU6].nBranchId,
+        NetworkUpgradeInfo[Consensus::UPGRADE_NU6_1].nBranchId,
+        NetworkUpgradeInfo[Consensus::UPGRADE_NU6_2].nBranchId,
+    };
+
+    for (const auto epochId : v2Epochs) {
+        EXPECT_FALSE(libzcash::IsV1HistoryTree(epochId));
+        EXPECT_TRUE(libzcash::IsV2HistoryTree(epochId));
+    }
+
+    EXPECT_FALSE(libzcash::IsV2HistoryTree(NetworkUpgradeInfo[Consensus::UPGRADE_NU6_3].nBranchId));
+
+    const auto node = libzcash::NewV2Leaf(
+        PatternedUint256(0x10),
+        2,
+        3,
+        PatternedUint256(0x20),
+        PatternedUint256(0x30),
+        PatternedUint256(0x40),
+        4,
+        5,
+        6);
+
+    // Older NU5 through NU6.2 chainstates store only this prefix on disk.
+    EXPECT_TRUE(std::all_of(
+        node.begin() + NODE_V2_SERIALIZED_LENGTH,
+        node.end(),
+        [](unsigned char byte) { return byte == 0; }));
+}
+
 TEST(History, Smoky) {
     // Fake an empty view
     CCoinsViewDummy fakeDB;
