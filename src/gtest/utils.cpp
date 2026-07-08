@@ -107,7 +107,24 @@ template<> void AppendRandomLeaf(OrchardMerkleFrontier &tree) {
     uint256 orchardAnchor;
     uint256 dataToBeSigned;
     // TODO: Create bundle.
-    auto builder = orchard::Builder(false, orchardAnchor);
+    // Any bundle version works here (only the tree root matters); the historical
+    // insecure version keeps this off the heavyweight NU6.2/NU6.3 proving keys.
+    auto builder = orchard::Builder(
+        false, {orchard::OrchardValuePool::Orchard, orchard::ProtocolVersion::InsecureV1}, orchardAnchor);
+    builder.AddOutput(std::nullopt, to, 0, std::nullopt);
+    auto bundle = builder.Build().value().ProveAndSign({}, dataToBeSigned).value();
+    tree.AppendBundle(bundle);
+}
+
+template<> void AppendRandomLeaf(IronwoodMerkleFrontier &tree) {
+    RawHDSeed seed(32, 0);
+    auto to = libzcash::OrchardSpendingKey::ForAccount(seed, 133, 0)
+        .ToFullViewingKey()
+        .GetChangeAddress();
+    uint256 ironwoodAnchor;
+    uint256 dataToBeSigned;
+    auto builder = orchard::Builder(
+        false, {orchard::OrchardValuePool::Ironwood, orchard::ProtocolVersion::V3}, ironwoodAnchor);
     builder.AddOutput(std::nullopt, to, 0, std::nullopt);
     auto bundle = builder.Build().value().ProveAndSign({}, dataToBeSigned).value();
     tree.AppendBundle(bundle);

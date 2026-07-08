@@ -1,10 +1,15 @@
+#[cfg(test)]
+use std::collections::HashSet;
 use std::{
     convert::TryInto,
     sync::{Once, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
+#[cfg(test)]
+use std::sync::Mutex;
 
 use rand_core::{OsRng, RngCore};
 
+#[cfg(not(test))]
 use crate::bridge::ffi;
 
 pub(crate) struct CacheEntry([u8; 32]);
@@ -26,11 +31,17 @@ impl CacheEntries {
 
 pub(crate) struct BundleValidityCache {
     hasher: blake2b_simd::State,
+    #[cfg(not(test))]
     cache: cxx::UniquePtr<ffi::BundleValidityCache>,
+    #[cfg(test)]
+    cache: Mutex<HashSet<[u8; 32]>>,
 }
 
 impl BundleValidityCache {
     fn new(kind: &'static str, personalization: &[u8; 16], cache_bytes: usize) -> Self {
+        #[cfg(test)]
+        let _ = kind;
+
         // Use BLAKE2b to produce entries from bundles. It has a block size of 128 bytes,
         // into which we put:
         // - 32 byte nonce
@@ -49,7 +60,10 @@ impl BundleValidityCache {
 
         Self {
             hasher,
+            #[cfg(not(test))]
             cache: ffi::NewBundleValidityCache(kind, cache_bytes),
+            #[cfg(test)]
+            cache: Mutex::new(HashSet::with_capacity(cache_bytes / 32)),
         }
     }
 
@@ -74,16 +88,33 @@ impl BundleValidityCache {
     pub(crate) fn insert(&mut self, queued_entries: CacheEntries) {
         if let CacheEntries::Storing(cache_entries) = queued_entries {
             for cache_entry in cache_entries {
+                #[cfg(not(test))]
                 self.cache.pin_mut().insert(cache_entry.0);
+                #[cfg(test)]
+                self.cache.lock().unwrap().insert(cache_entry.0);
             }
         }
     }
 
     pub(crate) fn contains(&self, entry: CacheEntry, queued_entries: &mut CacheEntries) -> bool {
-        if self
-            .cache
-            .contains(&entry.0, matches!(queued_entries, CacheEntries::NotStoring))
-        {
+        let cache_hit = {
+            #[cfg(not(test))]
+            {
+                self.cache
+                    .contains(&entry.0, matches!(queued_entries, CacheEntries::NotStoring))
+            }
+            #[cfg(test)]
+            {
+                let mut cache = self.cache.lock().unwrap();
+                if matches!(queued_entries, CacheEntries::NotStoring) {
+                    cache.remove(&entry.0)
+                } else {
+                    cache.contains(&entry.0)
+                }
+            }
+        };
+
+        if cache_hit {
             true
         } else {
             if let CacheEntries::Storing(cache_entries) = queued_entries {

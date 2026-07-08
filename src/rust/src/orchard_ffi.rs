@@ -9,16 +9,10 @@ use crate::{
 };
 
 struct BatchValidatorInner {
-    validator: orchard::bundle::BatchValidator,
+    // The lifetime here applies to a reference to a static VerifyingKey
+    validator: orchard::bundle::BatchValidator<'static>,
     queued_entries: CacheEntries,
-    // The verifying key against which this batch's proofs are checked. NU6.2 changed the
-    // Orchard circuit (and thus the verifying key), so a batch is typed to a specific circuit
-    // at construction: the NU6.2-onward (fixed) key from NU6.2, or the pre-NU6.2 (insecure)
-    // key before it. A batch never mixes epochs (one batch per block, and a fresh batch per
-    // transaction during mempool acceptance), so a single key per batch is correct. The key is
-    // fixed at construction rather than passed to `validate`, because some validation work is
-    // performed in `add_bundle`.
-    vk: &'static orchard::circuit::VerifyingKey,
+    valid: bool,
 }
 
 pub(crate) struct BatchValidator(Option<BatchValidatorInner>);
@@ -28,18 +22,76 @@ pub(crate) struct BatchValidator(Option<BatchValidatorInner>);
 /// circuit.
 pub(crate) fn orchard_batch_validation_init(
     cache_store: bool,
-    nu6_2_active: bool,
+    circuit_version: crate::bridge::ffi::OrchardCircuitVersion,
 ) -> Box<BatchValidator> {
-    let vk: &'static orchard::circuit::VerifyingKey = if nu6_2_active {
-        &crate::ORCHARD_VK_FIXED
-    } else {
-        &crate::ORCHARD_VK_INSECURE
+    // NOTE(azmr): we convert back to the real type ASAP to try to catch future enum variants
+    let circuit_version = match circuit_version {
+        crate::bridge::ffi::OrchardCircuitVersion::PostNu6_3 => {
+            orchard::circuit::OrchardCircuitVersion::PostNu6_3
+        }
+        crate::bridge::ffi::OrchardCircuitVersion::FixedPostNu6_2 => {
+            orchard::circuit::OrchardCircuitVersion::FixedPostNu6_2
+        }
+        crate::bridge::ffi::OrchardCircuitVersion::InsecurePreNu6_2 => {
+            orchard::circuit::OrchardCircuitVersion::InsecurePreNu6_2
+        }
+        _ => panic!(
+            "invalid orchard circuit version enum value: {}",
+            circuit_version.repr
+        ),
+    };
+    let vk: &'static orchard::circuit::VerifyingKey = match circuit_version {
+        orchard::circuit::OrchardCircuitVersion::PostNu6_3 => &crate::ORCHARD_VK_NU6_3,
+        orchard::circuit::OrchardCircuitVersion::FixedPostNu6_2 => &crate::ORCHARD_VK_FIXED,
+        orchard::circuit::OrchardCircuitVersion::InsecurePreNu6_2 => &crate::ORCHARD_VK_INSECURE,
     };
     Box::new(BatchValidator(Some(BatchValidatorInner {
-        validator: orchard::bundle::BatchValidator::new(),
+        validator: orchard::bundle::BatchValidator::new(vk),
         queued_entries: CacheEntries::new(cache_store),
-        vk,
+        valid: true,
     })))
+}
+
+impl BatchValidatorInner {
+    fn poison(&mut self, error_msg: &str) {
+        error!("{}", error_msg);
+        self.valid = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::orchard_bundle::none_orchard_bundle;
+
+    fn batch_validator(valid: bool) -> BatchValidator {
+        BatchValidator(Some(BatchValidatorInner {
+            validator: orchard::bundle::BatchValidator::new(&crate::ORCHARD_VK_INSECURE),
+            queued_entries: CacheEntries::new(false),
+            valid,
+        }))
+    }
+
+    #[test]
+    fn absent_bundle_does_not_poison_batch() {
+        let mut batch = batch_validator(true);
+
+        batch.add_bundle(none_orchard_bundle(), [0; 32]);
+
+        assert!(batch.0.as_ref().unwrap().valid);
+    }
+
+    #[test]
+    fn poisoned_batch_validation_fails_without_using_cache() {
+        let mut batch = batch_validator(true);
+        batch.0.as_mut().unwrap().poison("test poison");
+
+        // The bundle cache is intentionally not initialized in this test. If a
+        // poisoned batch tried to populate the cache, validation would panic.
+        assert!(!batch.validate());
+        assert!(batch.0.is_none());
+    }
 }
 
 impl BatchValidator {
@@ -52,26 +104,55 @@ impl BatchValidator {
             (Some(batch), Some(bundle)) => {
                 let cache = orchard_bundle_validity_cache();
 
+                let tx_version = match bundle.bundle_version().note_version() {
+                    orchard::NoteVersion::V2 => orchard::bundle::TxVersion::V5,
+                    orchard::NoteVersion::V3 => orchard::bundle::TxVersion::V6,
+                };
+
                 // Compute the cache entry for this bundle.
                 let cache_entry = {
-                    let bundle_commitment = bundle.commitment();
-                    let bundle_authorizing_commitment = bundle.authorizing_commitment();
-                    cache.compute_entry(
-                        bundle_commitment.0.as_bytes().try_into().unwrap(),
-                        bundle_authorizing_commitment
-                            .0
-                            .as_bytes()
-                            .try_into()
-                            .unwrap(),
-                        &sighash,
-                    )
+                    let bundle_commitment = match bundle.commitment(tx_version) {
+                        Ok(bundle_commitment) => bundle_commitment,
+                        Err(e) => {
+                            batch.poison(&format!(
+                                "bundle commitment must be computable for its transaction version: {}",
+                                e
+                            ));
+                            return;
+                        }
+                    };
+                    let bundle_authorizing_commitment = match bundle
+                        .authorizing_commitment(tx_version)
+                    {
+                        Ok(bundle_authorizing_commitment) => bundle_authorizing_commitment,
+                        Err(e) => {
+                            batch.poison(&format!(
+                                "bundle authorizing commitment must be computable for its transaction version: {}",
+                                e
+                            ));
+                            return;
+                        }
+                    };
+                    let Ok(bundle_commitment) = bundle_commitment.0.as_bytes().try_into() else {
+                        batch.poison("bundle commitment has invalid length");
+                        return;
+                    };
+                    let Ok(bundle_authorizing_commitment) =
+                        bundle_authorizing_commitment.0.as_bytes().try_into()
+                    else {
+                        batch.poison("bundle authorizing commitment has invalid length");
+                        return;
+                    };
+                    cache.compute_entry(bundle_commitment, bundle_authorizing_commitment, &sighash)
                 };
 
                 // Check if this bundle's validation result exists in the cache.
                 if !cache.contains(cache_entry, &mut batch.queued_entries) {
                     // The bundle has been added to `inner.queued_entries` because it was not
                     // in the cache. We now add its authorization to the validation batch.
-                    batch.validator.add_bundle(bundle, sighash);
+                    if batch.validator.add_bundle(bundle, sighash).is_err() {
+                        batch.poison("invalid bundle");
+                    }
                 }
             }
             (Some(_), None) => debug!("Tx has no Orchard component"),
@@ -97,9 +178,13 @@ impl BatchValidator {
     /// - `bindingSigOrchard` validity is enforced here.
     pub(crate) fn validate(&mut self) -> bool {
         if let Some(inner) = self.0.take() {
+            if !inner.valid {
+                return false;
+            }
+
             // The verifying key for this batch's circuit was fixed at construction
             // (`orchard_batch_validation_init`).
-            if inner.validator.validate(inner.vk, OsRng) {
+            if inner.validator.validate(OsRng) {
                 // `BatchValidator::validate()` is only called if every
                 // `BatchValidator::check_bundle()` returned `true`, so at this point
                 // every bundle that was added to `inner.queued_entries` has valid

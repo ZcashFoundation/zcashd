@@ -336,6 +336,7 @@ typedef libzcash::IncrementalWitness<INCREMENTAL_MERKLE_TREE_DEPTH_TESTING, libz
 
 class OrchardWallet;
 class OrchardMerkleFrontierLegacySer;
+class IronwoodMerkleFrontierLegacySer;
 
 class OrchardMerkleFrontier
 {
@@ -416,6 +417,95 @@ private:
     const OrchardMerkleFrontier& frontier;
 public:
     OrchardMerkleFrontierLegacySer(const OrchardMerkleFrontier& frontier): frontier(frontier) {}
+
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        try {
+            frontier.inner->serialize_legacy(*ToRustStream(s));
+        } catch (const std::exception& e) {
+            throw std::ios_base::failure(e.what());
+        }
+    }
+};
+
+class IronwoodMerkleFrontier
+{
+private:
+    /// An incremental Sinsemilla tree. Memory is allocated by Rust.
+    rust::Box<merkle_frontier::Orchard> inner;
+
+    friend class IronwoodMerkleFrontierLegacySer;
+public:
+    IronwoodMerkleFrontier() : inner(merkle_frontier::new_orchard()) {}
+
+    IronwoodMerkleFrontier(IronwoodMerkleFrontier&& frontier) : inner(std::move(frontier.inner)) {}
+
+    IronwoodMerkleFrontier(const IronwoodMerkleFrontier& frontier) :
+        inner(frontier.inner->box_clone()) {}
+
+    IronwoodMerkleFrontier& operator=(IronwoodMerkleFrontier&& frontier)
+    {
+        if (this != &frontier) {
+            inner = std::move(frontier.inner);
+        }
+        return *this;
+    }
+    IronwoodMerkleFrontier& operator=(const IronwoodMerkleFrontier& frontier)
+    {
+        if (this != &frontier) {
+            inner = frontier.inner->box_clone();
+        }
+        return *this;
+    }
+
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        try {
+            inner->serialize(*ToRustStream(s));
+        } catch (const std::exception& e) {
+            throw std::ios_base::failure(e.what());
+        }
+    }
+
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        try {
+            inner = merkle_frontier::parse_orchard(*ToRustStream(s));
+        } catch (const std::exception& e) {
+            throw std::ios_base::failure(e.what());
+        }
+    }
+
+    size_t DynamicMemoryUsage() const {
+        return inner->dynamic_memory_usage();
+    }
+
+    merkle_frontier::OrchardAppendResult AppendBundle(const OrchardBundle& bundle) {
+        return inner->append_bundle(*bundle.GetDetails());
+    }
+
+    const uint256 root() const {
+        return uint256::FromRawBytes(inner->root());
+    }
+
+    static uint256 empty_root() {
+        return uint256::FromRawBytes(merkle_frontier::orchard_empty_root());
+    }
+
+    size_t size() const {
+        return inner->size();
+    }
+
+    libzcash::SubtreeIndex current_subtree_index() const {
+        return (inner->size() >> libzcash::TRACKED_SUBTREE_HEIGHT);
+    }
+};
+
+class IronwoodMerkleFrontierLegacySer {
+private:
+    const IronwoodMerkleFrontier& frontier;
+public:
+    IronwoodMerkleFrontierLegacySer(const IronwoodMerkleFrontier& frontier): frontier(frontier) {}
 
     template<typename Stream>
     void Serialize(Stream& s) const {

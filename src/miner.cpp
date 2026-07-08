@@ -212,6 +212,10 @@ public:
 
     // Create Orchard output
     void operator()(const libzcash::OrchardRawAddress &to) const {
+        if (chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU6_3)) {
+            throw std::runtime_error("Orchard shielded coinbase invalid from NU6.3; use transparent/Sapling -mineraddress or mine with Zebra");
+        }
+
         std::array<uint8_t, 32> saplingAnchor;
         auto saplingBuilder = sapling::new_builder(*chainparams.RustNetwork(), nHeight, saplingAnchor, true);
 
@@ -219,14 +223,17 @@ public:
         // means the Orchard anchor is unconstrained, so we set it to the empty
         // tree root via a null (all zeroes) uint256.
         uint256 orchardAnchor;
-        // Choose the Orchard circuit to prove against (see CChainParams::UseFixedCircuitForProving).
-        bool useFixedCircuitForProving = chainparams.UseFixedCircuitForProving(nHeight);
-        auto builder = orchard::Builder(true, orchardAnchor, useFixedCircuitForProving);
+        auto builder = orchard::Builder(
+            true,
+            {orchard::OrchardValuePool::Orchard, orchard::ProtocolVersionForHeight(chainparams, nHeight)},
+            orchardAnchor);
 
         // Shielded coinbase outputs must be recoverable with an all-zeroes ovk.
         uint256 ovk;
         auto miner_reward = SetFoundersRewardAndGetMinerValue(*saplingBuilder);
-        builder.AddOutput(ovk, to, miner_reward, std::nullopt);
+        if (!builder.AddOutput(ovk, to, miner_reward, std::nullopt)) {
+            throw std::runtime_error("Failed to create shielded output for miner");
+        }
 
         // orchard::Builder pads to two Actions, but does so using a "no OVK" policy for
         // dummy outputs, which violates coinbase rules requiring all shielded outputs to
@@ -239,7 +246,9 @@ public:
             .ToFullViewingKey()
             .ToIncomingViewingKey()
             .Address(0);
-        builder.AddOutput(ovk, dummyTo, 0, std::nullopt);
+        if (!builder.AddOutput(ovk, dummyTo, 0, std::nullopt)) {
+            throw std::runtime_error("Failed to create shielded output for miner");
+        }
 
         auto bundle = builder.Build();
         if (!bundle.has_value()) {

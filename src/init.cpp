@@ -1877,8 +1877,10 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
 
                     SaplingMerkleTree sapling_tree;
                     OrchardMerkleFrontier orchard_tree;
+                    IronwoodMerkleFrontier ironwood_tree;
                     assert(pcoinsdbview->GetSaplingAnchorAt(pcoinsdbview->GetBestAnchor(SAPLING), sapling_tree));
                     assert(pcoinsdbview->GetOrchardAnchorAt(pcoinsdbview->GetBestAnchor(ORCHARD), orchard_tree));
+                    assert(pcoinsdbview->GetIronwoodAnchorAt(pcoinsdbview->GetBestAnchor(IRONWOOD), ironwood_tree));
 
                     if (pcoinsdbview->CurrentSubtreeIndex(SAPLING) != sapling_tree.current_subtree_index()) {
                         uiInterface.InitMessage(_("Regenerating subtrees for Sapling..."));
@@ -1908,6 +1910,21 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
                         gettimeofday(&tv_end, 0);
                         elapsed = float(tv_end.tv_sec-tv_start.tv_sec) + (tv_end.tv_usec-tv_start.tv_usec)/float(1000000);
                         LogPrintf("init: Orchard subtree database migrated in %f seconds\n", elapsed);
+                    }
+
+                    if (pcoinsdbview->CurrentSubtreeIndex(IRONWOOD) != ironwood_tree.current_subtree_index()) {
+                        uiInterface.InitMessage(_("Regenerating subtrees for Ironwood..."));
+                        LogPrintf("init: the complete subtree database for Ironwood needs to be migrated. Starting RegenerateSubtrees...\n");
+                        struct timeval tv_start, tv_end;
+                        float elapsed;
+                        gettimeofday(&tv_start, 0);
+                        if (!RegenerateSubtrees(IRONWOOD, chainparams.GetConsensus())) {
+                            strLoadError = _("Error migrating subtree database for Ironwood");
+                            break;
+                        }
+                        gettimeofday(&tv_end, 0);
+                        elapsed = float(tv_end.tv_sec-tv_start.tv_sec) + (tv_end.tv_usec-tv_start.tv_usec)/float(1000000);
+                        LogPrintf("init: Ironwood subtree database migrated in %f seconds\n", elapsed);
                     }
                 }
             } catch (const std::exception& e) {

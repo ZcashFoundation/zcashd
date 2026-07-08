@@ -51,6 +51,10 @@ public:
         return false;
     }
 
+    bool GetIronwoodAnchorAt(const uint256 &rt, IronwoodMerkleFrontier &tree) const {
+        return false;
+    }
+
     bool GetNullifier(const uint256 &nf, ShieldedType type) const {
         return false;
     }
@@ -117,15 +121,19 @@ public:
                     const uint256 &hashSproutAnchor,
                     const uint256 &hashSaplingAnchor,
                     const uint256 &hashOrchardAnchor,
+                    const uint256 &hashIronwoodAnchor,
                     CAnchorsSproutMap &mapSproutAnchors,
                     CAnchorsSaplingMap &mapSaplingAnchors,
                     CAnchorsOrchardMap &mapOrchardAnchors,
+                    CAnchorsIronwoodMap &mapIronwoodAnchors,
                     CNullifiersMap &mapSproutNullifiers,
                     CNullifiersMap &mapSaplingNullifiers,
                     CNullifiersMap &mapOrchardNullifiers,
+                    CNullifiersMap &mapIronwoodNullifiers,
                     CHistoryCacheMap &historyCacheMap,
                     SubtreeCache &cacheSaplingSubtrees,
-                    SubtreeCache &cacheOrchardSubtrees) {
+                    SubtreeCache &cacheOrchardSubtrees,
+                    SubtreeCache &cacheIronwoodSubtrees) {
         return false;
     }
 
@@ -606,6 +614,7 @@ TEST(Validation, FallbackChainSupplyCheckpoint) {
     const CAmount cpSproutValue = chainparams.ChainSupplyCheckpointSproutValue();
     const CAmount cpSaplingValue = chainparams.ChainSupplyCheckpointSaplingValue();
     const CAmount cpOrchardValue = chainparams.ChainSupplyCheckpointOrchardValue();
+    const CAmount cpIronwoodValue = chainparams.ChainSupplyCheckpointIronwoodValue();
     const CAmount cpLockboxValue = chainparams.ChainSupplyCheckpointLockboxValue();
 
     CBlockHeader header;
@@ -621,6 +630,7 @@ TEST(Validation, FallbackChainSupplyCheckpoint) {
     EXPECT_FALSE(beforeCheckpoint.nChainSproutValue.has_value());
     EXPECT_FALSE(beforeCheckpoint.nChainSaplingValue.has_value());
     EXPECT_FALSE(beforeCheckpoint.nChainOrchardValue.has_value());
+    EXPECT_FALSE(beforeCheckpoint.nChainIronwoodValue.has_value());
     EXPECT_FALSE(beforeCheckpoint.nChainLockboxValue.has_value());
 
     // At the checkpoint height with the correct hash, values are injected.
@@ -634,6 +644,7 @@ TEST(Validation, FallbackChainSupplyCheckpoint) {
     EXPECT_FALSE(atCheckpoint.nChainSproutValue.has_value());
     EXPECT_FALSE(atCheckpoint.nChainSaplingValue.has_value());
     EXPECT_FALSE(atCheckpoint.nChainOrchardValue.has_value());
+    EXPECT_FALSE(atCheckpoint.nChainIronwoodValue.has_value());
     EXPECT_FALSE(atCheckpoint.nChainLockboxValue.has_value());
 
     FallbackChainSupplyCheckpoint(&atCheckpoint, chainparams);
@@ -648,6 +659,8 @@ TEST(Validation, FallbackChainSupplyCheckpoint) {
     EXPECT_EQ(atCheckpoint.nChainSaplingValue.value(), cpSaplingValue);
     ASSERT_TRUE(atCheckpoint.nChainOrchardValue.has_value());
     EXPECT_EQ(atCheckpoint.nChainOrchardValue.value(), cpOrchardValue);
+    ASSERT_TRUE(atCheckpoint.nChainIronwoodValue.has_value());
+    EXPECT_EQ(atCheckpoint.nChainIronwoodValue.value(), cpIronwoodValue);
     ASSERT_TRUE(atCheckpoint.nChainLockboxValue.has_value());
     EXPECT_EQ(atCheckpoint.nChainLockboxValue.value(), cpLockboxValue);
 
@@ -659,6 +672,7 @@ TEST(Validation, FallbackChainSupplyCheckpoint) {
     EXPECT_EQ(atCheckpoint.nChainSproutValue.value(), cpSproutValue);
     EXPECT_EQ(atCheckpoint.nChainSaplingValue.value(), cpSaplingValue);
     EXPECT_EQ(atCheckpoint.nChainOrchardValue.value(), cpOrchardValue);
+    EXPECT_EQ(atCheckpoint.nChainIronwoodValue.value(), cpIronwoodValue);
     EXPECT_EQ(atCheckpoint.nChainLockboxValue.value(), cpLockboxValue);
 
     // If values are set but WRONG, the fallback should return false
@@ -724,6 +738,7 @@ TEST(Validation, FallbackChainSupplyCheckpoint) {
     afterCheckpoint.nChainSproutValue = std::nullopt;
     afterCheckpoint.nChainSaplingValue = std::nullopt;
     afterCheckpoint.nChainOrchardValue = std::nullopt;
+    afterCheckpoint.nChainIronwoodValue = std::nullopt;
     afterCheckpoint.nChainLockboxValue = std::nullopt;
     FallbackChainSupplyCheckpoint(&afterCheckpoint, chainparams);
     EXPECT_FALSE(afterCheckpoint.nChainTotalSupply.has_value());
@@ -731,6 +746,7 @@ TEST(Validation, FallbackChainSupplyCheckpoint) {
     EXPECT_FALSE(afterCheckpoint.nChainSproutValue.has_value());
     EXPECT_FALSE(afterCheckpoint.nChainSaplingValue.has_value());
     EXPECT_FALSE(afterCheckpoint.nChainOrchardValue.has_value());
+    EXPECT_FALSE(afterCheckpoint.nChainIronwoodValue.has_value());
     EXPECT_FALSE(afterCheckpoint.nChainLockboxValue.has_value());
 }
 

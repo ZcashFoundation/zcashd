@@ -49,10 +49,39 @@ namespace orchard {
 
 Builder::Builder(
     bool coinbase,
-    uint256 anchor,
-    bool useFixedCircuitForProving) : inner(nullptr, orchard_builder_free)
+    orchard::BundleVersion bundle_version,
+    uint256 anchor) : inner(nullptr, orchard_builder_free)
 {
-    inner.reset(orchard_builder_new(coinbase, anchor.IsNull() ? nullptr : anchor.begin(), useFixedCircuitForProving));
+    orchard::Flags flags{};
+    flags.spends_enabled = !coinbase;
+    flags.outputs_enabled = true;
+    // The cross-address flag-byte bit exists only for (Ironwood, V3) bundles; earlier
+    // protocol versions permit cross-address transfers unconditionally, and the FFI
+    // masks the bit for them.
+    // zcashd does not construct Ironwood coinbase bundles; post-NU6.3 shielded
+    // coinbase mining is handled by Zebra.
+    flags.cross_address_enabled = !coinbase &&
+        bundle_version.value_pool == orchard::OrchardValuePool::Ironwood &&
+        bundle_version.protocol_version == orchard::ProtocolVersion::V3;
+
+    inner.reset(orchard_builder_new(coinbase, bundle_version, flags, anchor.IsNull() ? nullptr : anchor.begin()));
+}
+
+ProtocolVersion ProtocolVersionForHeight(const CChainParams& chainparams, int nHeight)
+{
+    // Before NU6.2 on test networks, use the historical insecure revision so that
+    // tests can reconstruct pre-NU6.2 Orchard history. Mainnet always proves against
+    // a sound circuit: the emergency Orchard-disabling soft fork activated there long
+    // ago, and this makes the behaviour easier to reason about during sync or when
+    // eclipsed.
+    if (chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU6_3)) {
+        return ProtocolVersion::V3;
+    }
+    if (chainparams.NetworkIDString() == CBaseChainParams::MAIN ||
+        chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU6_2)) {
+        return ProtocolVersion::V2;
+    }
+    return ProtocolVersion::InsecureV1;
 }
 
 bool Builder::AddSpend(orchard::SpendInfo spendInfo)
@@ -72,7 +101,7 @@ bool Builder::AddSpend(orchard::SpendInfo spendInfo)
     }
 }
 
-void Builder::AddOutput(
+bool Builder::AddOutput(
     const std::optional<uint256>& ovk,
     const libzcash::OrchardRawAddress& to,
     CAmount value,
@@ -82,14 +111,18 @@ void Builder::AddOutput(
         throw std::logic_error("orchard::Builder has already been used");
     }
 
-    orchard_builder_add_recipient(
+    if (orchard_builder_add_recipient(
         inner.get(),
         ovk.has_value() ? ovk->begin() : nullptr,
         to.inner.get(),
         value,
-        memo.has_value() ? memo.value().ToBytes().data() : nullptr);
-
-    hasActions = true;
+        memo.has_value() ? memo.value().ToBytes().data() : nullptr))
+    {
+        hasActions = true;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 std::optional<UnauthorizedBundle> Builder::Build() {
@@ -228,9 +261,10 @@ TransactionBuilder::TransactionBuilder(
 
     // Ignore the Orchard anchor if we can't use it yet.
     if (orchardAnchor.has_value() && mtx.nVersion >= ZIP225_MIN_TX_VERSION) {
-        // Choose the Orchard circuit to prove against (see CChainParams::UseFixedCircuitForProving).
-        bool useFixedCircuitForProving = Params().UseFixedCircuitForProving(nHeight);
-        orchardBuilder = orchard::Builder(false, orchardAnchor.value(), useFixedCircuitForProving);
+        orchardBuilder = orchard::Builder(
+            false,
+            {orchard::OrchardValuePool::Orchard, orchard::ProtocolVersionForHeight(params, nHeight)},
+            orchardAnchor.value());
     }
 }
 
@@ -290,7 +324,7 @@ bool TransactionBuilder::AddOrchardSpend(
     return res;
 }
 
-void TransactionBuilder::AddOrchardOutput(
+bool TransactionBuilder::AddOrchardOutput(
     const std::optional<uint256>& ovk,
     const libzcash::OrchardRawAddress& to,
     CAmount value,
@@ -307,8 +341,11 @@ void TransactionBuilder::AddOrchardOutput(
         }
     }
 
-    orchardBuilder.value().AddOutput(ovk, to, value, memo);
-    valueBalanceOrchard -= value;
+    auto res = orchardBuilder.value().AddOutput(ovk, to, value, memo);
+    if (res) {
+        valueBalanceOrchard -= value;
+    }
+    return res;
 }
 
 void TransactionBuilder::AddSaplingSpend(
@@ -484,7 +521,9 @@ TransactionBuilderResult TransactionBuilder::Build()
         // if any; otherwise the first Sprout address given as input.
         // (A t-address can only be used as the change address if explicitly set.)
         if (orchardChangeAddr) {
-            AddOrchardOutput(orchardChangeAddr->first, orchardChangeAddr->second, change, std::nullopt);
+            if (!AddOrchardOutput(orchardChangeAddr->first, orchardChangeAddr->second, change, std::nullopt)) {
+                return TransactionBuilderResult("Failed to add Orchard change output to transaction");
+            }
         } else if (saplingChangeAddr) {
             AddSaplingOutput(saplingChangeAddr->first, saplingChangeAddr->second, change, std::nullopt);
         } else if (sproutChangeAddr) {
@@ -494,7 +533,9 @@ TransactionBuilderResult TransactionBuilder::Build()
             AddTransparentOutput(tChangeAddr.value(), change);
         } else if (firstOrchardSpendAddr.has_value()) {
             auto ovk = orchardSpendingKeys[0].ToFullViewingKey().ToInternalOutgoingViewingKey();
-            AddOrchardOutput(ovk, firstOrchardSpendAddr.value(), change, std::nullopt);
+            if (!AddOrchardOutput(ovk, firstOrchardSpendAddr.value(), change, std::nullopt)) {
+                return TransactionBuilderResult("Failed to add Orchard change output to transaction");
+            }
         } else if (firstSaplingSpendAddr.has_value()) {
             uint256 ovk;
             libzcash::SaplingPaymentAddress changeAddr;

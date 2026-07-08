@@ -463,6 +463,7 @@ class FakeCoinsViewDB : public CCoinsView {
     SproutMerkleTree sproutTree;
     std::vector<SaplingMerkleTree> saplingTrees;
     std::vector<OrchardMerkleFrontier> orchardTrees;
+    std::vector<IronwoodMerkleFrontier> ironwoodTrees;
 
 public:
     FakeCoinsViewDB(std::string dbName, uint256& hash) : db(GetDataDir() / dbName, 100, false, false), hash(hash) {
@@ -471,6 +472,9 @@ public:
 
         OrchardMerkleFrontier emptyOrchardTree;
         orchardTrees.push_back(emptyOrchardTree);
+
+        IronwoodMerkleFrontier emptyIronwoodTree;
+        ironwoodTrees.push_back(emptyIronwoodTree);
     }
     ~FakeCoinsViewDB() {}
 
@@ -532,6 +536,16 @@ public:
         return false;
     }
 
+    bool GetIronwoodAnchorAt(const uint256 &rt, IronwoodMerkleFrontier &tree) const {
+        for (const auto& ironwoodTree : ironwoodTrees) {
+            if (rt == ironwoodTree.root()) {
+                tree = ironwoodTree;
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool GetNullifier(const uint256 &nf, ShieldedType type) const {
         return false;
     }
@@ -556,6 +570,8 @@ public:
                 return saplingTrees[0].root();
             case ORCHARD:
                 return orchardTrees[0].root();
+            case IRONWOOD:
+                return ironwoodTrees[0].root();
             default:
                 throw std::runtime_error("Unknown shielded type");
         }
@@ -575,15 +591,19 @@ public:
                     const uint256 &hashSproutAnchor,
                     const uint256 &hashSaplingAnchor,
                     const uint256 &hashOrchardAnchor,
+                    const uint256 &hashIronwoodAnchor,
                     CAnchorsSproutMap &mapSproutAnchors,
                     CAnchorsSaplingMap &mapSaplingAnchors,
                     CAnchorsOrchardMap &mapOrchardAnchors,
+                    CAnchorsIronwoodMap &mapIronwoodAnchors,
                     CNullifiersMap &mapSproutNullifiers,
                     CNullifiersMap &mapSaplingNullifiers,
                     CNullifiersMap &mapOrchardNullifiers,
+                    CNullifiersMap &mapIronwoodNullifiers,
                     CHistoryCacheMap &historyCacheMap,
                     SubtreeCache &cacheSaplingSubtrees,
-                    SubtreeCache &cacheOrchardSubtrees) {
+                    SubtreeCache &cacheOrchardSubtrees,
+                    SubtreeCache &cacheIronwoodSubtrees) {
         return false;
     }
 

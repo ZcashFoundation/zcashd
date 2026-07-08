@@ -178,10 +178,11 @@ UniValue TxActionsToJSON(const rust::Vec<orchard_bundle::Action>& actions)
     return arr;
 }
 
-// See https://zips.z.cash/zip-0225
-UniValue TxOrchardBundleToJSON(const CTransaction& tx, UniValue& entry)
+// See https://zips.z.cash/zip-0225. Also used for the Ironwood bundle of v6
+// transactions, which shares the Orchard action structure.
+static UniValue OrchardBundleToJSON(const OrchardBundle& rawBundle)
 {
-    const auto& bundle = tx.GetOrchardBundle().GetDetails();
+    const auto& bundle = rawBundle.GetDetails();
 
     UniValue obj(UniValue::VOBJ);
     auto actions = bundle->actions();
@@ -301,8 +302,10 @@ void TxToJSON(const CTransaction& tx, const uint256 hashBlock, UniValue& entry)
             }
         }
         if (tx.nVersion >= ZIP225_TX_VERSION) {
-            UniValue orchard = TxOrchardBundleToJSON(tx, entry);
-            entry.pushKV("orchard", orchard);
+            entry.pushKV("orchard", OrchardBundleToJSON(tx.GetOrchardBundle()));
+        }
+        if (tx.nVersion >= ZIP248_MIN_TX_VERSION) {
+            entry.pushKV("ironwood", OrchardBundleToJSON(tx.GetIronwoodBundle()));
         }
     }
 
@@ -488,6 +491,7 @@ UniValue getrawtransaction(const UniValue& params, bool fHelp)
             "     \"proof\" : \"hex\",           (string, optional) Encoding of aggregated zk-SNARK proofs for Orchard Actions\n"
             "     \"bindingSig\" : \"hex\"       (string, optional) An Orchard binding signature on the SIGHASH transaction hash\n"
             "  },\n"
+            "  \"ironwood\" : {...},             (JSON object, only for version >= 6) Ironwood bundle in the same form as \"orchard\"\n"
             "  \"joinSplitPubKey\" : \"hex\",      (string, optional) An encoding of a JoinSplitSig public validating key\n"
             "  \"joinSplitSig\" : \"hex\",         (string, optional) The Sprout binding signature\n"
             "  \"blockhash\" : \"hash\",           (string) the block hash\n"

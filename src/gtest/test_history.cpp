@@ -1,8 +1,44 @@
 #include <gtest/gtest.h>
 
 #include "main.h"
+#include "rust/history.h"
 #include "util/test.h"
 #include "zcash/History.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <vector>
+
+namespace {
+
+uint256 PatternedUint256(uint8_t seed) {
+    std::array<uint8_t, 32> bytes;
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        bytes[i] = static_cast<uint8_t>(seed + i);
+    }
+    return uint256::FromRawBytes(bytes);
+}
+
+void AppendUint32LE(std::vector<unsigned char>& bytes, uint32_t value) {
+    bytes.push_back(static_cast<unsigned char>(value & 0xff));
+    bytes.push_back(static_cast<unsigned char>((value >> 8) & 0xff));
+    bytes.push_back(static_cast<unsigned char>((value >> 16) & 0xff));
+    bytes.push_back(static_cast<unsigned char>((value >> 24) & 0xff));
+}
+
+void AppendRawBytes(std::vector<unsigned char>& bytes, const uint256& value) {
+    const auto raw = value.ToRawBytes();
+    bytes.insert(bytes.end(), raw.begin(), raw.end());
+}
+
+void AppendSmallCompactSize(std::vector<unsigned char>& bytes, uint64_t value) {
+    assert(value < 253);
+    bytes.push_back(static_cast<unsigned char>(value));
+}
+
+} // namespace
 
 HistoryNode getLeafN(uint64_t block_num) {
     HistoryNode node = libzcash::NewV1Leaf(
@@ -15,6 +51,79 @@ HistoryNode getLeafN(uint64_t block_num) {
         3
     );
     return node;
+}
+
+TEST(History, NewV3LeafSerializesIronwoodFields) {
+    const auto commitment = PatternedUint256(0x10);
+    const auto saplingRoot = PatternedUint256(0x20);
+    const auto orchardRoot = PatternedUint256(0x30);
+    const auto ironwoodRoot = PatternedUint256(0x40);
+    const auto totalWork = PatternedUint256(0x50);
+    const uint32_t time = 2;
+    const uint32_t target = 3;
+    const uint64_t height = 4;
+    const uint64_t saplingTxCount = 5;
+    const uint64_t orchardTxCount = 6;
+    const uint64_t ironwoodTxCount = 7;
+
+    const auto node = libzcash::NewV3Leaf(
+        commitment,
+        time,
+        target,
+        saplingRoot,
+        orchardRoot,
+        ironwoodRoot,
+        totalWork,
+        height,
+        saplingTxCount,
+        orchardTxCount,
+        ironwoodTxCount);
+
+    std::vector<unsigned char> expected;
+    AppendRawBytes(expected, commitment);
+    AppendUint32LE(expected, time);
+    AppendUint32LE(expected, time);
+    AppendUint32LE(expected, target);
+    AppendUint32LE(expected, target);
+    AppendRawBytes(expected, saplingRoot);
+    AppendRawBytes(expected, saplingRoot);
+    AppendRawBytes(expected, totalWork);
+    AppendSmallCompactSize(expected, height);
+    AppendSmallCompactSize(expected, height);
+    AppendSmallCompactSize(expected, saplingTxCount);
+    AppendRawBytes(expected, orchardRoot);
+    AppendRawBytes(expected, orchardRoot);
+    AppendSmallCompactSize(expected, orchardTxCount);
+    AppendRawBytes(expected, ironwoodRoot);
+    AppendRawBytes(expected, ironwoodRoot);
+    AppendSmallCompactSize(expected, ironwoodTxCount);
+
+    ASSERT_LE(expected.size(), node.size());
+    EXPECT_TRUE(std::equal(expected.begin(), expected.end(), node.begin()));
+    EXPECT_TRUE(std::all_of(
+        node.begin() + expected.size(),
+        node.end(),
+        [](unsigned char byte) { return byte == 0; }));
+}
+
+TEST(History, NewV3LeafParsesAsRustV3) {
+    const auto consensusBranchId = NetworkUpgradeInfo[Consensus::UPGRADE_NU6_3].nBranchId;
+    const auto node = libzcash::NewV3Leaf(
+        PatternedUint256(0x10),
+        2,
+        3,
+        PatternedUint256(0x20),
+        PatternedUint256(0x30),
+        PatternedUint256(0x40),
+        PatternedUint256(0x50),
+        4,
+        5,
+        6,
+        7);
+
+    std::array<uint8_t, 32> hash;
+    ASSERT_NO_THROW(hash = mmr::hash_node(consensusBranchId, node));
+    EXPECT_FALSE(uint256::FromRawBytes(hash).IsNull());
 }
 
 TEST(History, Smoky) {

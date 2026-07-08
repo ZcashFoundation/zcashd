@@ -229,6 +229,9 @@ void ThrowInputSelectionError(
                     side,
                     err.maxNotes,
                     err.orchardNotes));
+        },
+        [](const IronwoodUnsupportedError&) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, IRONWOOD_WALLET_UNSUPPORTED);
         }
     });
 }

@@ -345,6 +345,19 @@ public:
         side(side), orchardNotes(orchardNotes), maxNotes(maxNotes) { }
 };
 
+/// Error when a transaction would involve the Orchard pool at NU6.3 heights or later.
+/// zcashd has permanently descoped Ironwood wallet support, and from NU6.3 the Orchard
+/// pool rejects the third-party outputs that wallet transactions require, so any Orchard
+/// involvement (spends, payments, or change) is rejected at preparation time.
+class IronwoodUnsupportedError {
+public:
+    IronwoodUnsupportedError() { }
+};
+
+/// The user-facing message for `IronwoodUnsupportedError`. The wording must convey
+/// permanent unsupport (never "not yet available"): the wallet descope is final.
+extern const std::string IRONWOOD_WALLET_UNSUPPORTED;
+
 typedef std::variant<
     AddressResolutionError,
     InvalidFundsError,
@@ -352,7 +365,8 @@ typedef std::variant<
     InvalidFeeError,
     AbsurdFeeError,
     MaxFeeError,
-    ExcessOrchardActionsError> InputSelectionError;
+    ExcessOrchardActionsError,
+    IronwoodUnsupportedError> InputSelectionError;
 
 class InputSelection {
 private:

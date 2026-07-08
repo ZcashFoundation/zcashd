@@ -53,11 +53,20 @@ HistoryNode NewNode(
         uint64_t startHeight,
         uint64_t endHeight,
         uint64_t saplingTxCount,
-        std::optional<uint64_t> orchardTxCount
+        std::optional<uint64_t> orchardTxCount,
+        std::optional<uint256> startIronwoodRoot,
+        std::optional<uint256> endIronwoodRoot,
+        std::optional<uint64_t> ironwoodTxCount
     )
 {
     CDataStream buf(SER_DISK, 0);
     HistoryNode result = {};
+
+    assert(startOrchardRoot.has_value() == endOrchardRoot.has_value());
+    assert(startOrchardRoot.has_value() == orchardTxCount.has_value());
+    assert(startIronwoodRoot.has_value() == endIronwoodRoot.has_value());
+    assert(startIronwoodRoot.has_value() == ironwoodTxCount.has_value());
+    assert(!startIronwoodRoot.has_value() || startOrchardRoot.has_value());
 
     buf << subtreeCommitment;
     buf << startTime;
@@ -75,6 +84,11 @@ HistoryNode NewNode(
         buf << startOrchardRoot.value();
         buf << endOrchardRoot.value();
         buf << COMPACTSIZE(orchardTxCount.value());
+        if (startIronwoodRoot) {
+            buf << startIronwoodRoot.value();
+            buf << endIronwoodRoot.value();
+            buf << COMPACTSIZE(ironwoodTxCount.value());
+        }
     }
 
     assert(buf.size() <= NODE_SERIALIZED_LENGTH);
@@ -105,6 +119,9 @@ HistoryNode NewV1Leaf(
         height,
         height,
         saplingTxCount,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
         std::nullopt
     );
 }
@@ -134,7 +151,44 @@ HistoryNode NewV2Leaf(
         height,
         height,
         saplingTxCount,
-        orchardTxCount
+        orchardTxCount,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt
+    );
+}
+
+HistoryNode NewV3Leaf(
+    uint256 commitment,
+    uint32_t time,
+    uint32_t target,
+    uint256 saplingRoot,
+    uint256 orchardRoot,
+    uint256 ironwoodRoot,
+    uint256 totalWork,
+    uint64_t height,
+    uint64_t saplingTxCount,
+    uint64_t orchardTxCount,
+    uint64_t ironwoodTxCount
+) {
+    return NewNode(
+        commitment,
+        time,
+        time,
+        target,
+        target,
+        saplingRoot,
+        saplingRoot,
+        orchardRoot,
+        orchardRoot,
+        totalWork,
+        height,
+        height,
+        saplingTxCount,
+        orchardTxCount,
+        ironwoodRoot,
+        ironwoodRoot,
+        ironwoodTxCount
     );
 }
 

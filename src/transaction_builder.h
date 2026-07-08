@@ -91,19 +91,21 @@ private:
     Builder() : inner(nullptr, orchard_builder_free), hasActions(false) { }
 
 public:
-    // `useFixedCircuitForProving` selects the circuit version to prove against (the fixed circuit, else
-    // the historical insecure one). The bundle records it and reuses it in ProveAndSign. Compute
-    // it with `CChainParams::UseFixedCircuitForProving`; the default (true) is correct for non-test callers.
-    Builder(bool coinbase, uint256 anchor, bool useFixedCircuitForProving = true);
+    // `bundle_version` fully determines the circuit: the builder stamps it on the
+    // bundle, and proving reads the circuit version back from the bundle itself (see
+    // `orchard_unauthorized_bundle_prove_and_sign`). Construct it from the value pool
+    // being spent/paid and `orchard::ProtocolVersionForHeight`.
+    Builder(bool coinbase, orchard::BundleVersion bundle_version, uint256 anchor);
 
     // Builder should never be copied
     Builder(const Builder&) = delete;
     Builder& operator=(const Builder&) = delete;
-    Builder(Builder&& builder) : inner(std::move(builder.inner)) {}
+    Builder(Builder&& builder) : inner(std::move(builder.inner)), hasActions(std::move(builder.hasActions)) {}
     Builder& operator=(Builder&& builder)
     {
         if (this != &builder) {
             inner = std::move(builder.inner);
+            hasActions = std::move(builder.hasActions);
         }
         return *this;
     }
@@ -115,7 +117,9 @@ public:
     bool AddSpend(orchard::SpendInfo spendInfo);
 
     /// Adds an address which will receive funds in this bundle.
-    void AddOutput(
+    ///
+    /// Returns `false` if the recipient is not valid for this builder's bundle version.
+    bool AddOutput(
         const std::optional<uint256>& ovk,
         const libzcash::OrchardRawAddress& to,
         CAmount value,
@@ -184,6 +188,16 @@ public:
     std::optional<OrchardBundle> ProveAndSign(
         const std::vector<libzcash::OrchardSpendingKey>& keys, uint256 sighash);
 };
+
+/// Returns the Orchard protocol revision in force for a transaction built at the
+/// given height: V3 from NU6.3, V2 from NU6.2, or, before NU6.2 on test networks,
+/// the historical insecure revision so that tests can reconstruct pre-NU6.2 Orchard
+/// history.
+///
+/// The caller combines this with its choice of value pool to form a
+/// `BundleVersion`. Note that only (Orchard, any) and (Ironwood, V3) are valid
+/// combinations; the FFI rejects the rest.
+ProtocolVersion ProtocolVersionForHeight(const CChainParams& chainparams, int nHeight);
 
 } // namespace orchard
 
@@ -346,7 +360,7 @@ public:
         libzcash::OrchardSpendingKey sk,
         orchard::SpendInfo spendInfo);
 
-    void AddOrchardOutput(
+    bool AddOrchardOutput(
         const std::optional<uint256>& ovk,
         const libzcash::OrchardRawAddress& to,
         CAmount value,

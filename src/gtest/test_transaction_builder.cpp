@@ -249,7 +249,7 @@ TEST(TransactionBuilder, TransparentToOrchard)
     // 0.00005 t-ZEC in, 0.00004 z-ZEC out, default fee
     auto builder = TransactionBuilder(Params(), 1, orchardAnchor, SaplingMerkleTree::empty_root(), &keystore);
     builder.AddTransparentInput(COutPoint(uint256S("1234"), 0), scriptPubKey, 5000);
-    builder.AddOrchardOutput(std::nullopt, recipient, 4000, std::nullopt);
+    EXPECT_TRUE(builder.AddOrchardOutput(std::nullopt, recipient, 4000, std::nullopt));
     auto maybeTx = builder.Build();
     EXPECT_TRUE(maybeTx.IsTx());
     if (maybeTx.IsError()) {
@@ -272,6 +272,42 @@ TEST(TransactionBuilder, TransparentToOrchard)
 
     // Revert to default
     RegtestDeactivateNU5();
+}
+
+TEST(TransactionBuilder, FailedOrchardOutputDoesNotMutateBuilder)
+{
+    auto consensusParams = RegtestActivateNU6point3();
+
+    CBasicKeyStore keystore;
+    CKey tsk = AddTestCKeyToKeyStore(keystore);
+    auto scriptPubKey = GetScriptForDestination(tsk.GetPubKey().GetID());
+    CTxDestination taddr = tsk.GetPubKey().GetID();
+
+    auto coinType = Params().BIP44CoinType();
+    auto seed = MnemonicSeed::Random(coinType);
+    auto sk = libzcash::OrchardSpendingKey::ForAccount(seed, coinType, 0);
+    auto recipient = sk.ToFullViewingKey().ToIncomingViewingKey().Address(0);
+
+    orchard::Builder orchardBuilder(
+        false,
+        {orchard::OrchardValuePool::Orchard, orchard::ProtocolVersionForHeight(Params(), 1)},
+        uint256());
+    EXPECT_FALSE(orchardBuilder.AddOutput(std::nullopt, recipient, 4000, std::nullopt));
+    EXPECT_FALSE(orchardBuilder.HasActions());
+
+    auto builder = TransactionBuilder(Params(), 1, uint256(), SaplingMerkleTree::empty_root(), &keystore);
+    builder.SetFee(1000);
+    builder.AddTransparentInput(COutPoint(uint256S("1234"), 0), scriptPubKey, 5000);
+    EXPECT_FALSE(builder.AddOrchardOutput(std::nullopt, recipient, 4000, std::nullopt));
+    builder.AddTransparentOutput(taddr, 4000);
+
+    auto maybeTx = builder.Build();
+    ASSERT_TRUE(maybeTx.IsTx()) << maybeTx.GetError();
+    auto tx = maybeTx.GetTxOrThrow();
+    EXPECT_FALSE(tx.GetOrchardBundle().IsPresent());
+    EXPECT_EQ(tx.vout.size(), 1);
+
+    RegtestDeactivateNU6point3();
 }
 
 TEST(TransactionBuilder, RejectsTransparentToOrchardIfDisabled)
@@ -300,7 +336,7 @@ TEST(TransactionBuilder, RejectsTransparentToOrchardIfDisabled)
     // 0.00005 t-ZEC in, 0.00004 z-ZEC out, default fee
     auto builder = TransactionBuilder(Params(), 1, orchardAnchor, SaplingMerkleTree::empty_root(), &keystore);
     builder.AddTransparentInput(COutPoint(uint256S("1234"), 0), scriptPubKey, 5000);
-    builder.AddOrchardOutput(std::nullopt, recipient, 4000, std::nullopt);
+    EXPECT_TRUE(builder.AddOrchardOutput(std::nullopt, recipient, 4000, std::nullopt));
     auto maybeTx = builder.Build();
     EXPECT_TRUE(maybeTx.IsTx());
     if (maybeTx.IsError()) {
