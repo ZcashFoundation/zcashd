@@ -1,9 +1,9 @@
 Deprecation Procedure
 =====================
 
-> **Note:** `zcashd` is [deprecated](../user/end-of-life.md) and will not
-> support NU6.3; the automatic End-of-Support halt is estimated for July 18th 2026 at block
-> height 3417100 (NU6.3 mainnet activation follows around July 21st).
+> **Note:** Upstream `zcashd` is [deprecated](../user/end-of-life.md). This Valargroup
+> compatibility build uses block height 3470000, estimated for September 4th 2026, as its
+> End-of-Support marker. Its automatic halt is disabled, only warning about the end-of-life height.
 
 From time to time, features of `zcashd` and its associated wallet and RPC API are
 deprecated to allow eventual removal of functionality that has been superseded

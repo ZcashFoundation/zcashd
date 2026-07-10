@@ -1,9 +1,8 @@
 # `zcashd` Release Support
 
-> **Note:** `zcashd` is [deprecated](end-of-life.md) and will not support NU6.3. Its
-> 6.20.0 **End-of-Support halt** — block height 3417100, estimated 2026-07-18 — is when the
-> binary automatically shuts down, ahead of NU6.3 mainnet activation (estimated 2026-07-21).
-> See the [End of Life](end-of-life.md) page for the full timeline and migration guidance.
+> **Note:** Upstream `zcashd` is [deprecated](end-of-life.md). This Valargroup
+> compatibility build uses block height 3470000, estimated 2026-09-04, as its
+> **End-of-Support marker**. The automatic halt is disabled in this build.
 
 ## Release cadence and support window
 
@@ -53,5 +52,5 @@ time, and may shift due to changes in network solution power.
 | 6.12.3 | 2026-05-07 | 3417100 | 2026-07-16 |
 | 6.12.4 | 2026-06-01 | 3417100 | 2026-07-20 |
 | 6.12.5 | 2026-06-02 | 3417100 | 2026-07-21 |
-| 6.20.0 | 2026-06-02 | 3417100 | 2026-07-21 |
+| v1.0.0-compat | 2026-06-02 | 3470000 | 2026-09-04 |
 <!-- RELEASE_SCRIPT_END_MARKER -->

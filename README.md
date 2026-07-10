@@ -1,17 +1,13 @@
-Zcash 6.20.0
+Zcash v1.0.0-compat
 <img align="right" width="120" height="80" src="doc/imgs/logo.png">
 ===========
 
-> ## ⚠️ `zcashd` is reaching its End of Life
+> ## ⚠️ Upstream `zcashd` is reaching its End of Life
 >
-> `zcashd` is **deprecated** and will **not** support NU6.3; its automatic
-> End-of-Support halt is estimated for July 18th 2026 at block height 3417100, after which
-> every node shuts down (NU6.3 mainnet activation follows around July 21st). If you do not
-> need the `zcashd` wallet, migrate to
-> [Zebra](https://github.com/ZcashFoundation/zebra) now. If you depend on the `zcashd`
-> wallet, start testing [Zallet](https://zcash.github.io/zallet/) immediately. See the
-> [End of Life](https://zcash.github.io/zcash/user/end-of-life.html) page for the full
-> timeline and migration guidance.
+> This Valargroup compatibility build uses block height 3470000, estimated for September
+> 4th 2026, as its End-of-Support marker. Its automatic halt is disabled; see the
+> [End of Life](https://zcash.github.io/zcash/user/end-of-life.html) page for migration
+> guidance.
 
 > ## Zakura sidecar build
 >

@@ -18,6 +18,10 @@ using ::testing::StrictMock;
 
 static const std::string CLIENT_VERSION_STR = FormatVersion(CLIENT_VERSION);
 
+TEST(DeprecationConfigTest, UsesScheduledEndOfSupportHeight) {
+    EXPECT_EQ(DEPRECATION_HEIGHT, 3470000);
+}
+
 class DeprecationTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -122,7 +126,7 @@ TEST_F(DeprecationTest, AlertNotify) {
 
     // -alertnotify restricts the message to safe characters.
     auto expectedMsg = strprintf(
-        "This version will be deprecated at block height %d, and will automatically shut down. You should upgrade to the latest version of Zcash.",
+        "This version will reach end of support at block height %d. The automatic halt is disabled in this build, but you should upgrade to a supported version.",
         DEPRECATION_HEIGHT);
 
     // Windows built-in echo semantics are different than posixy shells. Quotes and

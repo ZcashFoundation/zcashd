@@ -66,9 +66,9 @@ void EnforceNodeDeprecation(const CChainParams& params, int nHeight, bool forceL
         }
     } else if (blocksToDeprecation == DEPRECATION_WARN_LIMIT ||
                (blocksToDeprecation < DEPRECATION_WARN_LIMIT && forceLogging)) {
-        std::string msg = strprintf(_("This version will be deprecated at block height %d, and will automatically shut down."),
+        std::string msg = strprintf(_("This version will reach end of support at block height %d."),
                             DEPRECATION_HEIGHT) + " " +
-                  _("You should upgrade to the latest version of Zcash.");
+                  _("The automatic halt is disabled in this build, but you should upgrade to a supported version.");
         LogPrintf("*** %s\n", msg);
         AlertNotify(msg, fThread);
         uiInterface.ThreadSafeMessageBox(msg, "", CClientUIInterface::MSG_WARNING);

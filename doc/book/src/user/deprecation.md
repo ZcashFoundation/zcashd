@@ -1,10 +1,9 @@
 Deprecated Features
 ===================
 
-> **Note:** `zcashd` is [deprecated](end-of-life.md) and will not support
-> NU6.3; the automatic End-of-Support halt is estimated for July 18th 2026 at block height
-> 3417100 (NU6.3 mainnet activation follows around July 21st). See the
-> [End of Life](end-of-life.md) page for migration guidance to Zebra and Zallet.
+> **Note:** Upstream `zcashd` is [deprecated](end-of-life.md). This Valargroup
+> compatibility build uses block height 3470000, estimated for September 4th 2026, as its
+> End-of-Support marker.
 
 In order to support the continuous improvement of `zcashd`, features are
 periodically deprecated and removed when they have been superseded or are no
