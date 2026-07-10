@@ -962,6 +962,47 @@ void InitParameterInteraction()
     }
 }
 
+bool ValidateZcashdSidecarPeerLock(std::string* error)
+{
+    const std::vector<std::string>& connect = mapMultiArgs["-connect"];
+
+    if (connect.size() != 1 || connect[0].empty() || connect[0] == "0") {
+        *error = _("This zcashd sidecar build must be started with exactly one -connect=<zakura-address> peer.");
+        return false;
+    }
+
+    const std::vector<std::string> forbiddenPeerOptions = {
+        "-addnode",
+        "-seednode",
+    };
+
+    for (const std::string& option : forbiddenPeerOptions) {
+        if (mapArgs.count(option) || !mapMultiArgs[option].empty()) {
+            *error = strprintf(
+                _("This zcashd sidecar build refuses %s because it must peer only with the single -connect Zakura node."),
+                option);
+            return false;
+        }
+    }
+
+    if (GetBoolArg("-listen", false)) {
+        *error = _("This zcashd sidecar build refuses -listen=1 because it must not accept inbound P2P connections.");
+        return false;
+    }
+
+    if (mapArgs.count("-bind") || !mapMultiArgs["-bind"].empty()) {
+        *error = _("This zcashd sidecar build refuses -bind because it must not open a P2P listener.");
+        return false;
+    }
+
+    if (mapArgs.count("-whitebind") || !mapMultiArgs["-whitebind"].empty()) {
+        *error = _("This zcashd sidecar build refuses -whitebind because it must not open a P2P listener.");
+        return false;
+    }
+
+    return true;
+}
+
 void InitLogging()
 {
     fPrintToConsole = GetBoolArg("-printtoconsole", false);
@@ -1073,6 +1114,11 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     auto err = InitExperimentalMode();
     if (err) {
         return InitError(err.value());
+    }
+
+    std::string sidecarPeerLockError;
+    if (!ValidateZcashdSidecarPeerLock(&sidecarPeerLockError)) {
+        return InitError(sidecarPeerLockError);
     }
 
     // if using block pruning, then disable txindex
@@ -1675,7 +1721,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     }
 
     // see Step 2: parameter interactions for more information about these
-    fListen = GetBoolArg("-listen", DEFAULT_LISTEN);
+    fListen = false;
     fDiscover = GetBoolArg("-discover", true);
     fNameLookup = GetBoolArg("-dns", DEFAULT_NAME_LOOKUP);
 

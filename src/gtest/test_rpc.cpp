@@ -4,13 +4,42 @@
 #include "chain.h"
 #include "chainparams.h"
 #include "clientversion.h"
+#include "init.h"
 #include "main.h"
 #include "primitives/block.h"
+#include "rpc/register.h"
 #include "rpc/server.h"
 #include "streams.h"
+#include "util/system.h"
 #include "util/strencodings.h"
 
 extern UniValue blockToJSON(const CBlock& block, const CBlockIndex* blockindex, bool txDetails = false);
+
+class ArgsTestingSetup {
+private:
+    std::map<std::string, std::string> savedArgs;
+    std::map<std::string, std::vector<std::string> > savedMultiArgs;
+
+public:
+    ArgsTestingSetup()
+        : savedArgs(mapArgs), savedMultiArgs(mapMultiArgs)
+    {
+        mapArgs.clear();
+        mapMultiArgs.clear();
+    }
+
+    ~ArgsTestingSetup()
+    {
+        mapArgs = savedArgs;
+        mapMultiArgs = savedMultiArgs;
+    }
+};
+
+static void SetSingleConnectArg(const std::string& address = "127.0.0.1:8233")
+{
+    mapArgs["-connect"] = address;
+    mapMultiArgs["-connect"].push_back(address);
+}
 
 TEST(rpc, CheckBlockToJSONReturnsMinifiedSolution) {
     SelectParams(CBaseChainParams::TESTNET);
@@ -106,4 +135,80 @@ TEST(rpc, ParseHeightArg) {
     ASSERT_THROW(parseHeightArg("-01", 21), UniValue);
     ASSERT_THROW(parseHeightArg("-0x15", 21), UniValue);
     ASSERT_THROW(parseHeightArg("", 21), UniValue);
+}
+
+TEST(rpc, SidecarPeerLockAllowsSingleConnectOnly) {
+    ArgsTestingSetup testArgs;
+    SetSingleConnectArg();
+
+    std::string error;
+    EXPECT_TRUE(ValidateZcashdSidecarPeerLock(&error));
+    EXPECT_TRUE(error.empty());
+}
+
+TEST(rpc, SidecarPeerLockRejectsMissingOrAmbiguousConnect) {
+    {
+        ArgsTestingSetup testArgs;
+        std::string error;
+        EXPECT_FALSE(ValidateZcashdSidecarPeerLock(&error));
+        EXPECT_NE(std::string::npos, error.find("exactly one -connect"));
+    }
+
+    {
+        ArgsTestingSetup testArgs;
+        SetSingleConnectArg();
+        mapMultiArgs["-connect"].push_back("127.0.0.2:8233");
+        std::string error;
+        EXPECT_FALSE(ValidateZcashdSidecarPeerLock(&error));
+        EXPECT_NE(std::string::npos, error.find("exactly one -connect"));
+    }
+
+    {
+        ArgsTestingSetup testArgs;
+        mapArgs["-connect"] = "0";
+        mapMultiArgs["-connect"].push_back("0");
+        std::string error;
+        EXPECT_FALSE(ValidateZcashdSidecarPeerLock(&error));
+        EXPECT_NE(std::string::npos, error.find("exactly one -connect"));
+    }
+}
+
+TEST(rpc, SidecarPeerLockRejectsPeerSelectionAndListeners) {
+    for (const std::string& option : std::vector<std::string>{"-addnode", "-seednode"}) {
+        ArgsTestingSetup testArgs;
+        SetSingleConnectArg();
+        mapArgs[option] = "127.0.0.2:8233";
+        mapMultiArgs[option].push_back("127.0.0.2:8233");
+
+        std::string error;
+        EXPECT_FALSE(ValidateZcashdSidecarPeerLock(&error));
+        EXPECT_NE(std::string::npos, error.find(option));
+    }
+
+    for (const std::string& option : std::vector<std::string>{"-bind", "-whitebind"}) {
+        ArgsTestingSetup testArgs;
+        SetSingleConnectArg();
+        mapArgs[option] = "127.0.0.1:8233";
+        mapMultiArgs[option].push_back("127.0.0.1:8233");
+
+        std::string error;
+        EXPECT_FALSE(ValidateZcashdSidecarPeerLock(&error));
+        EXPECT_NE(std::string::npos, error.find(option));
+    }
+
+    ArgsTestingSetup listenArgs;
+    SetSingleConnectArg();
+    mapArgs["-listen"] = "1";
+
+    std::string error;
+    EXPECT_FALSE(ValidateZcashdSidecarPeerLock(&error));
+    EXPECT_NE(std::string::npos, error.find("-listen=1"));
+}
+
+TEST(rpc, SidecarBuildDoesNotRegisterAddnodeRpc) {
+    CRPCTable table;
+    RegisterNetRPCCommands(table);
+
+    EXPECT_EQ(nullptr, table["addnode"]);
+    EXPECT_NE(nullptr, table["getpeerinfo"]);
 }

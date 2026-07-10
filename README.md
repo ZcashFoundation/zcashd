@@ -13,6 +13,13 @@ Zcash 6.20.0
 > [End of Life](https://zcash.github.io/zcash/user/end-of-life.html) page for the full
 > timeline and migration guidance.
 
+> ## Zakura sidecar build
+>
+> This Valargroup compatibility branch is a P2P sidecar build for Zakura. The
+> binary hard-locks P2P networking to exactly one `-connect=<zakura-address>`
+> peer, refuses listener/additional-peer options, and does not register the
+> `addnode` RPC.
+
 What is Zcash?
 --------------
 

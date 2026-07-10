@@ -674,7 +674,8 @@ static const CRPCCommand commands[] =
     { "network",            "getdeprecationinfo",     &getdeprecationinfo,     true  },
     { "network",            "ping",                   &ping,                   true  },
     { "network",            "getpeerinfo",            &getpeerinfo,            true  },
-    { "network",            "addnode",                &addnode,                true  },
+    // addnode is intentionally not registered: this sidecar build must peer
+    // only with the single -connect Zakura node configured at startup.
     { "network",            "disconnectnode",         &disconnectnode,         true  },
     { "network",            "getaddednodeinfo",       &getaddednodeinfo,       true  },
     { "network",            "getnettotals",           &getnettotals,           true  },

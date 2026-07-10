@@ -1037,10 +1037,6 @@ class CTransaction(object):
         isNu5V5 = (self.fOverwintered and
                        self.nVersionGroupId == ZIP225_VERSION_GROUP_ID and
                        self.nVersion == 5)
-        isNu6V6 = (self.fOverwintered and
-            self.nVersionGroupId == ZIP248_VERSION_GROUP_ID and
-            self.nVersion == 6) # @todo: rest of the owl
-
         if isNu5V5:
             # Common transaction fields
             self.nConsensusBranchId = struct.unpack("<I", f.read(4))[0]
@@ -1096,10 +1092,6 @@ class CTransaction(object):
         isNu5V5 = (self.fOverwintered and
                        self.nVersionGroupId == ZIP225_VERSION_GROUP_ID and
                        self.nVersion == 5)
-        isNu6V6 = (self.fOverwintered and
-                       self.nVersionGroupId == ZIP248_VERSION_GROUP_ID and
-                       self.nVersion == 6) # @todo: rest of the owl
-
         if isNu5V5:
             r = b""
 

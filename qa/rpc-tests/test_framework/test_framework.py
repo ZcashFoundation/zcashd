@@ -29,6 +29,13 @@ from .util import (
     PortSeed,
 )
 
+SIDECAR_RPC_TESTS_DISABLED_MESSAGE = (
+    "Skipping legacy RPC regression test: this Valargroup zcashd build is a "
+    "Zakura P2P sidecar that must run with exactly one -connect peer and no "
+    "addnode/inbound P2P. The upstream RPC test harness builds standalone "
+    "multi-node topologies, so those tests are disabled for this build."
+)
+
 
 class BitcoinTestFramework(object):
 
@@ -130,6 +137,9 @@ class BitcoinTestFramework(object):
 
         if self.options.coveragedir:
             enable_coverage(self.options.coveragedir)
+
+        print(SIDECAR_RPC_TESTS_DISABLED_MESSAGE)
+        sys.exit(0)
 
         PortSeed.n = self.options.port_seed
 

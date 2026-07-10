@@ -59,41 +59,6 @@ impl BatchValidatorInner {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use crate::orchard_bundle::none_orchard_bundle;
-
-    fn batch_validator(valid: bool) -> BatchValidator {
-        BatchValidator(Some(BatchValidatorInner {
-            validator: orchard::bundle::BatchValidator::new(&crate::ORCHARD_VK_INSECURE),
-            queued_entries: CacheEntries::new(false),
-            valid,
-        }))
-    }
-
-    #[test]
-    fn absent_bundle_does_not_poison_batch() {
-        let mut batch = batch_validator(true);
-
-        batch.add_bundle(none_orchard_bundle(), [0; 32]);
-
-        assert!(batch.0.as_ref().unwrap().valid);
-    }
-
-    #[test]
-    fn poisoned_batch_validation_fails_without_using_cache() {
-        let mut batch = batch_validator(true);
-        batch.0.as_mut().unwrap().poison("test poison");
-
-        // The bundle cache is intentionally not initialized in this test. If a
-        // poisoned batch tried to populate the cache, validation would panic.
-        assert!(!batch.validate());
-        assert!(batch.0.is_none());
-    }
-}
-
 impl BatchValidator {
     /// Adds an Orchard bundle to this batch.
     pub(crate) fn add_bundle(&mut self, bundle: Box<Bundle>, sighash: [u8; 32]) {
@@ -198,5 +163,40 @@ impl BatchValidator {
             error!("orchard::BatchValidator has already been used");
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::orchard_bundle::none_orchard_bundle;
+
+    fn batch_validator(valid: bool) -> BatchValidator {
+        BatchValidator(Some(BatchValidatorInner {
+            validator: orchard::bundle::BatchValidator::new(&crate::ORCHARD_VK_INSECURE),
+            queued_entries: CacheEntries::new(false),
+            valid,
+        }))
+    }
+
+    #[test]
+    fn absent_bundle_does_not_poison_batch() {
+        let mut batch = batch_validator(true);
+
+        batch.add_bundle(none_orchard_bundle(), [0; 32]);
+
+        assert!(batch.0.as_ref().unwrap().valid);
+    }
+
+    #[test]
+    fn poisoned_batch_validation_fails_without_using_cache() {
+        let mut batch = batch_validator(true);
+        batch.0.as_mut().unwrap().poison("test poison");
+
+        // The bundle cache is intentionally not initialized in this test. If a
+        // poisoned batch tried to populate the cache, validation would panic.
+        assert!(!batch.validate());
+        assert!(batch.0.is_none());
     }
 }

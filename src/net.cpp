@@ -1488,7 +1488,6 @@ void ThreadOpenConnections()
     {
         for (int64_t nLoop = 0;; nLoop++)
         {
-            ProcessOneShot();
             for (const std::string& strAddr : mapMultiArgs["-connect"])
             {
                 CAddress addr;
@@ -1967,8 +1966,8 @@ void StartNode(boost::thread_group& threadGroup, CScheduler& scheduler)
     // Send and receive from sockets, accept connections
     threadGroup.create_thread(boost::bind(&TraceThread<void (*)()>, "net", &ThreadSocketHandler));
 
-    // Initiate outbound connections from -addnode
-    threadGroup.create_thread(boost::bind(&TraceThread<void (*)()>, "addcon", &ThreadOpenAddedConnections));
+    // This sidecar build rejects -addnode during init and unregisters the
+    // addnode RPC, so no added-peer thread is started.
 
     // Initiate outbound connections unless connect=0
     if (!mapArgs.count("-connect") || mapMultiArgs["-connect"].size() != 1 || mapMultiArgs["-connect"][0] != "0")

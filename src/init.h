@@ -30,6 +30,8 @@ void Shutdown();
 void InitLogging();
 //!Parameter interaction: change current parameters depending on various rules
 void InitParameterInteraction();
+//! Sidecar P2P hard-lock: require exactly one pinned peer and no listener.
+bool ValidateZcashdSidecarPeerLock(std::string* error);
 bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler);
 
 /** The help message mode determines what help message to show */

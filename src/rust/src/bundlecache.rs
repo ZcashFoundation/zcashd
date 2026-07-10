@@ -1,11 +1,11 @@
 #[cfg(test)]
 use std::collections::HashSet;
+#[cfg(test)]
+use std::sync::Mutex;
 use std::{
     convert::TryInto,
     sync::{Once, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
-#[cfg(test)]
-use std::sync::Mutex;
 
 use rand_core::{OsRng, RngCore};
 
