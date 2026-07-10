@@ -1,9 +1,9 @@
 Deprecated Features
 ===================
 
-> **Note:** Upstream `zcashd` is [deprecated](end-of-life.md). This Valargroup
-> compatibility build uses block height 3470000, estimated for September 4th 2026, as its
-> End-of-Support marker.
+> **Note:** Unlike [upstream `zcashd`](end-of-life.md), this Valargroup
+> compatibility build has no scheduled End of Life or End-of-Support height.
+> See [Release Support](release-support.md) for its support policy.
 
 In order to support the continuous improvement of `zcashd`, features are
 periodically deprecated and removed when they have been superseded or are no
@@ -73,7 +73,6 @@ line to `zcash.conf`.
 | `wallettxvjoinsplit`                | 5.1.0      | 5.4.0            | The `vjoinsplit` attribute returned by the `gettransaction` RPC method.
 | `z_getbalance`                      | 5.0.0      | 6.2.0            | The `z_getbalance` RPC method.
 | `gbt_oldhashes`                     | 5.4.0      | 6.2.0            | The `finalsaplingroothash`, `lightclientroothash`, and `blockcommitmentshash` fields in the output of `getblocktemplate`, which are replaced by the `defaultroots` field.
-| `deprecationinfo_deprecationheight` | 5.5.0      | 6.2.0            | The `deprecationheight` field returned by the `getdeprecationinfo` RPC method has been replaced by the `end_of_service` object.
 | `getnetworkhashps`                  | 6.2.0      | 6.2.0            | The `getnetworkhashps` RPC method (use `getnetworksolps` instead).
 
 `*` As of version 6.2.0, `addrtype` is default-disabled even when zcashd is compiled without the `ENABLE_WALLET` flag.

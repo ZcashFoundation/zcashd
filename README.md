@@ -2,12 +2,14 @@ Zcash v1.0.0-compat
 <img align="right" width="120" height="80" src="doc/imgs/logo.png">
 ===========
 
-> ## ⚠️ Upstream `zcashd` is reaching its End of Life
+> ## Compatibility support policy
 >
-> This Valargroup compatibility build uses block height 3470000, estimated for September
-> 4th 2026, as its End-of-Support marker. Its automatic halt is disabled; see the
-> [End of Life](https://zcash.github.io/zcash/user/end-of-life.html) page for migration
-> guidance.
+> Unlike upstream `zcashd`, this Valargroup compatibility build has no scheduled
+> End of Life and does not halt or warn at an End-of-Support block height. Valargroup
+> reserves the right to announce a future End of Life through a Zakura compatibility
+> release. Integrators are encouraged to migrate to
+> [Zakura](https://github.com/zakura-core/zakura) and monitor its
+> [CHANGELOG](https://github.com/zakura-core/zakura/blob/main/CHANGELOG.md).
 
 > ## Zakura sidecar build
 >

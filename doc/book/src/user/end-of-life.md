@@ -1,5 +1,9 @@
 # End of Life
 
+> **Compatibility build:** This page preserves the upstream `zcashd` End-of-Life
+> timeline. It does not apply to the Valargroup compatibility build, which has no
+> scheduled End of Life. See [Release Support](release-support.md).
+>
 > ## ⚠️ `zcashd` is reaching its End of Life
 >
 > `zcashd` is **deprecated** and will **not** support NU6.3.
@@ -14,11 +18,8 @@
 `zcashd`'s End of Life involves two distinct milestones. Don't conflate them:
 
 - **`zcashd` End-of-Support halt — estimated July 18th 2026, at block height 3417100.**
-  The point at which every `zcashd` 6.20.0 binary automatically shuts down and refuses to
-  restart. This is hard-coded as the deprecation height (`DEPRECATION_HEIGHT` in
-  `src/deprecation.h`). The date is an estimate that may shift with network solution power;
-  query the exact height your node will halt at with the `getdeprecationinfo` JSON-RPC
-  method. See [Release Support](release-support.md) for more on the End-of-Support halt.
+  The point at which every upstream `zcashd` 6.20.0 binary automatically shuts down and
+  refuses to restart. The date is an estimate that may shift with network solution power.
 - **NU6.3 mainnet activation — estimated July 21st 2026.** The Ironwood/NU6.3 network
   upgrade activates on mainnet a few days *after* the End-of-Support halt. The halt is
   deliberately targeted to precede activation so that every un-upgraded `zcashd` node has

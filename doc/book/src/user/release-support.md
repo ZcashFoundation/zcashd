@@ -1,56 +1,13 @@
 # `zcashd` Release Support
 
-> **Note:** Upstream `zcashd` is [deprecated](end-of-life.md). This Valargroup
-> compatibility build uses block height 3470000, estimated 2026-09-04, as its
-> **End-of-Support marker**. The automatic halt is disabled in this build.
+Upstream `zcashd` releases have an [End-of-Life policy](end-of-life.md) that
+automatically halts the node at a release-specific block height.
 
-## Release cadence and support window
+This Valargroup compatibility build is different: it has no scheduled End of Life
+and does not halt or warn at an End-of-Support block height.
 
-`zcashd` releases happen approximately every six weeks, although this may change if a
-particular release is delayed, or if a hotfix release occurs.
-
-Each `zcashd` release is generally supported for 16 weeks. Occasionally this changes for
-individual releases (for example, near to a Network Upgrade activation).
-
-These two policies mean that there are generally at least two separate `zcashd` versions
-currently supported at any given time.
-
-## End-of-Support halt
-
-Every `zcashd` version released by ECC has an End-of-Support height. When the Zcash chain
-reaches this height, `zcashd` will automatically shut down, and the binary will refuse to
-restart. This is for several reasons:
-
-- The `zcashd` maintainers do not have the resources to maintain old versions of `zcashd`
-  indefinitely.
-- Each time a user upgrades their `zcashd` node, they are re-confirming that they are
-  happy to run the Zcash consensus rules encoded in the version of `zcashd` they are
-  running. This is an important part of the overall strategy for changes to the node and
-  consensus rules; users who want to follow different rules (or even just have a different
-  End-of-Support halt policy) will obtain a `zcashd` binary from some other source, with
-  its own support policies.
-- Knowing that old versions will shut down is useful for planning backwards-incompatible
-  changes in Network Upgrades. A Network Upgrade activation can be targeted for a height
-  where we know that all released `zcashd` versions which _did not_ support the Network
-  Upgrade will have shut down by the time the Network Upgrade activates.
-
-## End-of-Support heights
-
-The End-of-Support height for a running `zcashd` can be queried over JSON-RPC using the
-`getdeprecationinfo` method.
-
-The following table shows End-of-Support information for recent `zcashd` releases. It is
-automatically updated during each release. "End of Support" dates are estimated at that
-time, and may shift due to changes in network solution power.
-
-<!-- RELEASE_SCRIPT_START_MARKER - If you make changes here, check make-release.py -->
-| `zcashd` version | Release date | Halt height | End of Support |
-| ---------------- | ------------ | ----------- | -------------- |
-| 6.12.0 | 2026-03-27 | 3417100 | 2026-07-17 |
-| 6.12.1 | 2026-04-17 | 3417100 | 2026-07-17 |
-| 6.12.2 | 2026-05-06 | 3417100 | 2026-07-15 |
-| 6.12.3 | 2026-05-07 | 3417100 | 2026-07-16 |
-| 6.12.4 | 2026-06-01 | 3417100 | 2026-07-20 |
-| 6.12.5 | 2026-06-02 | 3417100 | 2026-07-21 |
-| v1.0.0-compat | 2026-06-02 | 3470000 | 2026-09-04 |
-<!-- RELEASE_SCRIPT_END_MARKER -->
+Valargroup reserves the right to announce a future End of Life through a Zakura
+compatibility release. Integrators are encouraged to migrate to
+[Zakura](https://github.com/zakura-core/zakura) and monitor its
+[CHANGELOG](https://github.com/zakura-core/zakura/blob/main/CHANGELOG.md) for
+compatibility and support announcements.

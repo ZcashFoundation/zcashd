@@ -143,12 +143,9 @@ Examples:
     $ ./zcutil/make-release.py b89b48cda1 v1.1.0 v1.1.0-rc1 v1.0.0 300600
 
 Ordinarily, we choose a release height that is a couple hundred blocks in
-the future in order to give time for CI to run.
-
-If it is necessary that the version you are building reach its end-of-service
-halt in less time than the ordinary 16 weeks, it may be necessary to modify
-the value of the `RELEASE_TO_DEPRECATION_WEEKS` constant in `deprecation.h`
-prior to running `make-release.py`.
+the future in order to give time for CI to run. This height helps offline
+transaction signing select the current consensus branch; it does not schedule
+an End of Life for the compatibility build.
 
 ### Create, Review, and Merge the release branch pull request
 

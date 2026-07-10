@@ -94,6 +94,8 @@ class WalletDeprecationTest(BitcoinTestFramework):
 
     def run_test(self):
         dep_info = self.nodes[0].getdeprecationinfo()
+        assert 'deprecationheight' not in dep_info
+        assert 'end_of_service' not in dep_info
         default_enabled = dep_info['deprecated_features']
         default_disabled = dep_info['disabled_features']
 

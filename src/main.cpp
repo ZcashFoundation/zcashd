@@ -17,7 +17,6 @@
 #include "consensus/merkle.h"
 #include "consensus/upgrades.h"
 #include "consensus/validation.h"
-#include "deprecation.h"
 #include "experimental_features.h"
 #include "init.h"
 #include "key_io.h"
@@ -4919,8 +4918,6 @@ bool static ConnectTip(CValidationState& state, const CChainParams& chainparams,
     // Increment the count of `ConnectTip` calls.
     nConnectedSequence += 1;
 
-    EnforceNodeDeprecation(chainparams, pindexNew->nHeight);
-
     int64_t nTime6 = GetTimeMicros(); nTimePostConnect += nTime6 - nTime5;
     LogPrint("bench", "  - Connect postprocess: %.2fms [%.2fs]\n", (nTime6 - nTime5) * 0.001, nTimePostConnect * 0.000001);
     // Total connection time benchmarking occurs in ActivateBestChainStep.
@@ -7091,8 +7088,6 @@ bool static LoadBlockIndexDB(const CChainParams& chainparams)
         chainActive.Tip()->GetBlockHash().ToString(), chainActive.Height(),
         DateTimeStrFormat("%Y-%m-%d %H:%M:%S", chainActive.Tip()->GetBlockTime()),
         Checkpoints::GuessVerificationProgress(chainparams.Checkpoints(), chainActive.Tip()));
-
-    EnforceNodeDeprecation(chainparams, chainActive.Height(), true);
 
     return true;
 }

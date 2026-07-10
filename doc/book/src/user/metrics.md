@@ -17,7 +17,7 @@ programmatic consumption.
 - P2P network:
   - `getnetworkinfo`: Various state info regarding P2P networking.
   - `getpeerinfo`: Data about each connected network node.
-  - `getdeprecationinfo`: The current node version and deprecation block height.
+  - `getdeprecationinfo`: The current node version and deprecated feature status.
 - Miscellaneous
   - `getmemoryinfo`: Information about memory usage.
   - `getmininginfo`: Mining-related information.

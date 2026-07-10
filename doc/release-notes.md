@@ -66,3 +66,16 @@ inbound to zcashd.
 After publishing this sidecar release, update Zakura's pinned compatibility
 manifest and installer checksums to this build.
 
+Compatibility support policy
+----------------------------
+
+Unlike upstream zcashd, this compatibility build has no scheduled End of Life.
+It no longer contains an End-of-Support height, emits height-based support
+warnings, requires the upstream deprecation acknowledgment at startup, or
+returns End-of-Service data from `getdeprecationinfo`.
+
+Valargroup reserves the right to announce a future End of Life through a Zakura
+compatibility release. Integrators are encouraged to migrate to
+[Zakura](https://github.com/zakura-core/zakura) and monitor its
+[CHANGELOG](https://github.com/zakura-core/zakura/blob/main/CHANGELOG.md).
+

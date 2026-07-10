@@ -31,8 +31,8 @@ Options:
        Print version and exit
 
   -alertnotify=<cmd>
-       Execute command on node end-of-service or when we see a really long fork
-       (%s in cmd is replaced by message)
+       Execute command when we see a really long fork (%s in cmd is replaced by
+       message)
 
   -allowdeprecated=<feature>
        Explicitly allow the use of the specified deprecated feature. Multiple
@@ -40,9 +40,9 @@ Options:
        selected from among {"none", "createrawtransaction",
        "fundrawtransaction", "getnetworkhashps", "keypoolrefill", "settxfee",
        "signrawtransaction", "z_gettotalbalance", "addrtype",
-       "deprecationinfo_deprecationheight", "gbt_oldhashes", "getnewaddress",
-       "getrawchangeaddress", "legacy_privacy", "wallettxvjoinsplit",
-       "z_getbalance", "z_getnewaddress", "z_listaddresses"}
+       "gbt_oldhashes", "getnewaddress", "getrawchangeaddress", "legacy_privacy",
+       "wallettxvjoinsplit", "z_getbalance", "z_getnewaddress",
+       "z_listaddresses"}
 
   -blocknotify=<cmd>
        Execute command when the best block changes (%s in cmd is replaced by

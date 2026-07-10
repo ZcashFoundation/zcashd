@@ -14,8 +14,8 @@ void LoadGlobalWallet();
 void UnloadGlobalWallet();
 
 // A mock for uiInterface.ThreadSafeMessageBox, for tests of code that notifies the
-// user via that signal (e.g. a divergence-triggered shutdown or end-of-service
-// halt). The gtest harness connects no slot, so without one the signals2 combiner
+// user via that signal (e.g. a divergence-triggered shutdown). The gtest harness
+// connects no slot, so without one the signals2 combiner
 // throws on zero slots; ConnectMockUIInterface connects this mock.
 class MockUIInterface {
 public:

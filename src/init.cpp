@@ -321,7 +321,7 @@ std::string HelpMessage(HelpMessageMode mode)
     std::string strUsage = HelpMessageGroup(_("Options:"));
     strUsage += HelpMessageOpt("-?", _("Print this help message and exit"));
     strUsage += HelpMessageOpt("-version", _("Print version and exit"));
-    strUsage += HelpMessageOpt("-alertnotify=<cmd>", _("Execute command on node end-of-service or when we see a really long fork (%s in cmd is replaced by message)"));
+    strUsage += HelpMessageOpt("-alertnotify=<cmd>", _("Execute command when we see a really long fork (%s in cmd is replaced by message)"));
     strUsage += HelpMessageOpt("-allowdeprecated=<feature>", strprintf(_("Explicitly allow the use of the specified deprecated feature. Multiple instances of this parameter are permitted; values for <feature> must be selected from among {%s}"), GetAllowableDeprecatedFeatures()));
     strUsage += HelpMessageOpt("-blocknotify=<cmd>", _("Execute command when the best block changes (%s in cmd is replaced by block hash)"));
     if (showDebug)

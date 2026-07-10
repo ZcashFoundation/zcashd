@@ -4,15 +4,10 @@
 
 #include "deprecation.h"
 
-#include "alert.h"
-#include "clientversion.h"
-#include "init.h"
-#include "ui_interface.h"
 #include "util/system.h"
 
 // Flags that enable deprecated functionality.
 bool fEnableGbtOldHashes = true;
-bool fEnableDeprecationInfoDeprecationHeight = true;
 bool fEnableAddrTypeField = true;
 bool fEnableGetNetworkHashPS = true;
 bool fEnableCreateRawTransaction = true;
@@ -30,50 +25,6 @@ bool fEnableFundRawTransaction = true;
 bool fEnableKeyPoolRefill = true;
 bool fEnableSetTxFee = true;
 #endif
-
-static const std::string CLIENT_VERSION_STR = FormatVersion(CLIENT_VERSION);
-
-int64_t EstimatedNodeDeprecationTime(const CClock& clock, int nHeight) {
-    auto blocksToDeprecation = DEPRECATION_HEIGHT - nHeight;
-
-    return clock.GetTime() + (blocksToDeprecation * Consensus::POST_BLOSSOM_POW_TARGET_SPACING);
-}
-
-void EnforceNodeDeprecation(const CChainParams& params, int nHeight, bool forceLogging, bool fThread) {
-    // Do not enforce deprecation in regtest or on testnet
-    std::string networkID = params.NetworkIDString();
-    if (networkID != "main") return;
-
-    int blocksToDeprecation = DEPRECATION_HEIGHT - nHeight;
-    if (blocksToDeprecation <= 0) {
-        // This build runs as a P2P sidecar behind a Zebra node, which performs
-        // consensus validation; the upstream end-of-support auto-shutdown is
-        // disabled so the sidecar keeps serving its wallet/RPC surface past the
-        // upstream deprecation height. Warn instead of shutting down.
-        //
-        // In order to ensure we only log once per process when deprecation is
-        // disabled (to avoid log spam), we only need to log in two cases:
-        // - The deprecating block just arrived
-        //   - This can be triggered more than once if a block chain reorg
-        //     occurs, but that's an irregular event that won't cause spam.
-        // - The node is starting
-        if (blocksToDeprecation == 0 || forceLogging) {
-            auto msg = strprintf(_("Block height %d has passed the upstream zcashd end-of-support height %d; continuing because the end-of-support halt is disabled in this build."),
-                                 nHeight, DEPRECATION_HEIGHT);
-            LogPrintf("*** %s\n", msg);
-            AlertNotify(msg, fThread);
-            uiInterface.ThreadSafeMessageBox(msg, "", CClientUIInterface::MSG_WARNING);
-        }
-    } else if (blocksToDeprecation == DEPRECATION_WARN_LIMIT ||
-               (blocksToDeprecation < DEPRECATION_WARN_LIMIT && forceLogging)) {
-        std::string msg = strprintf(_("This version will reach end of support at block height %d."),
-                            DEPRECATION_HEIGHT) + " " +
-                  _("The automatic halt is disabled in this build, but you should upgrade to a supported version.");
-        LogPrintf("*** %s\n", msg);
-        AlertNotify(msg, fThread);
-        uiInterface.ThreadSafeMessageBox(msg, "", CClientUIInterface::MSG_WARNING);
-    }
-}
 
 std::optional<std::string> LoadAllowedDeprecatedFeatures() {
     auto args = GetMultiArg("-allowdeprecated");
@@ -107,7 +58,6 @@ std::optional<std::string> LoadAllowedDeprecatedFeatures() {
     }
 
     fEnableGbtOldHashes = allowdeprecated.count("gbt_oldhashes") > 0;
-    fEnableDeprecationInfoDeprecationHeight = allowdeprecated.count("deprecationinfo_deprecationheight") > 0;
     fEnableAddrTypeField = allowdeprecated.count("addrtype") > 0;
 #ifdef ENABLE_WALLET
     fEnableLegacyPrivacyStrategy = allowdeprecated.count("legacy_privacy") > 0;

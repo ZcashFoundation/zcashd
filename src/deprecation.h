@@ -5,24 +5,12 @@
 #ifndef ZCASH_DEPRECATION_H
 #define ZCASH_DEPRECATION_H
 
-#include "chainparams.h"
-#include "consensus/params.h"
-#include "util/time.h"
+#include <optional>
+#include <set>
+#include <string>
 
-// Deprecation policy:
-// Per https://zips.z.cash/zip-0200
-// Upstream nodes shut down `RELEASE_TO_DEPRECATION_WEEKS` weeks' worth of blocks after
-// the estimated release block height. This compatibility build uses a manually scheduled
-// height and warns during the preceding 14 days, but does not automatically shut down.
+// Used by offline transaction signing to estimate the current consensus branch.
 static const int APPROX_RELEASE_HEIGHT = 3360652;
-static const int RELEASE_TO_DEPRECATION_WEEKS = 7;
-static const int EXPECTED_BLOCKS_PER_HOUR = 3600 / Consensus::POST_BLOSSOM_POW_TARGET_SPACING;
-static_assert(EXPECTED_BLOCKS_PER_HOUR == 48, "The value of Consensus::POST_BLOSSOM_POW_TARGET_SPACING was chosen such that this assertion holds.");
-static const int ACTIVATION_TO_DEPRECATION_BLOCKS = (RELEASE_TO_DEPRECATION_WEEKS * 7 * 24 * EXPECTED_BLOCKS_PER_HOUR);
-static const int DEPRECATION_HEIGHT = 3470000;
-
-// Number of blocks before deprecation to warn users
-static const int DEPRECATION_WARN_LIMIT = 14 * 24 * EXPECTED_BLOCKS_PER_HOUR;
 
 //! Defaults for -allowdeprecated
 static const std::set<std::string> DEFAULT_ALLOW_DEPRECATED{{
@@ -42,7 +30,6 @@ static const std::set<std::string> DEFAULT_ALLOW_DEPRECATED{{
 static const std::set<std::string> DEFAULT_DENY_DEPRECATED{{
     // Node-level features
     "gbt_oldhashes",
-    "deprecationinfo_deprecationheight",
     "addrtype",
 
     // Wallet-level features
@@ -59,7 +46,6 @@ static const std::set<std::string> DEFAULT_DENY_DEPRECATED{{
 
 // Flags that enable deprecated functionality.
 extern bool fEnableGbtOldHashes;
-extern bool fEnableDeprecationInfoDeprecationHeight;
 extern bool fEnableAddrTypeField;
 extern bool fEnableGetNetworkHashPS;
 extern bool fEnableCreateRawTransaction;
@@ -77,22 +63,6 @@ extern bool fEnableFundRawTransaction;
 extern bool fEnableKeyPoolRefill;
 extern bool fEnableSetTxFee;
 #endif
-
-/**
- * Returns the estimated time, in seconds since the epoch, at which deprecation
- * enforcement will take effect for this node.
- */
-int64_t EstimatedNodeDeprecationTime(const CClock& clock, int nHeight);
-
-/**
- * Checks whether the node is deprecated based on the current block height, and
- * shuts down the node with an error if so (and deprecation is not disabled for
- * the current client version). Warning and error messages are sent to the debug
- * log, the metrics UI, and (if configured) -alertnofity.
- *
- * fThread means run -alertnotify in a free-running thread.
- */
-void EnforceNodeDeprecation(const CChainParams& params, int nHeight, bool forceLogging=false, bool fThread=true);
 
 /**
  * Checks config options for enabling and/or disabling of deprecated
