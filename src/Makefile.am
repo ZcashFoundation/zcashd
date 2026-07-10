@@ -750,9 +750,17 @@ libzcash_script_la_SOURCES = \
 libzcash_script_la_LDFLAGS = $(AM_LDFLAGS) -no-undefined $(RELDFLAGS)
 if TARGET_WINDOWS
 # Rust staticlibs may contain duplicate PE/COFF import stubs for Windows DLLs.
-libzcash_script_la_LDFLAGS += -Wl,--allow-multiple-definition
+# llvm-mingw's lld crashes when linking those into a libtool DLL, so keep the
+# Windows script library static while still exercising --with-libs.
+libzcash_script_la_LDFLAGS += -static -Wl,--allow-multiple-definition
 endif
+if TARGET_WINDOWS
+# Avoid merging Rust's staticlib into the Windows script archive; libtool trips
+# over duplicate object names inside librustzcash.a when producing the .a.
+libzcash_script_la_LIBADD = $(LIBSECP256K1)
+else
 libzcash_script_la_LIBADD = $(LIBRUSTZCASH) $(LIBSECP256K1)
+endif
 libzcash_script_la_CPPFLAGS = $(AM_CPPFLAGS) -I$(builddir)/obj -I$(srcdir)/rust/include -I$(srcdir)/rust/gen/include -I$(srcdir)/secp256k1/include -DBUILD_BITCOIN_INTERNAL
 libzcash_script_la_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
 

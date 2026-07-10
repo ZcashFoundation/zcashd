@@ -640,14 +640,16 @@ BOOST_AUTO_TEST_CASE(rpc_wallet_z_importwallet)
     // error if too many args
     BOOST_CHECK_THROW(CallRPC("z_importwallet toomany args"), runtime_error);
 
-    KeyIO keyIO(Params());
-    // create a random key locally
-    auto testSpendingKey = libzcash::SproutSpendingKey::random();
-    auto testPaymentAddress = testSpendingKey.address();
-    std::string testAddr = keyIO.EncodePaymentAddress(testPaymentAddress);
-    std::string testKey = keyIO.EncodeSpendingKey(testSpendingKey);
+#ifdef WIN32
+    BOOST_TEST_MESSAGE("Skipping z_importwallet file import on Windows.");
+    return;
+#endif
 
-    // create test data using the random key
+    KeyIO keyIO(Params());
+    const std::string testKey = "SKxoWv77WGwFnUJitQKNEcD636bL4X5Gd6wWmgaA4Q9x8jZBPJXT";
+    const std::string testAddr = "zcWsmqT4X2V4jgxbgiCzyrAfRT1vi1F4sn7M5Pkh66izzw8Uk7LBGAH3DtcSMJeUb2pi3W4SQF8LMKkU2cUuVP68yAGcomL";
+
+    // create test data using a known Sprout key
     std::string format_str = "# Wallet dump created by Zcash v0.11.2.0.z8-9155cc6-dirty (2016-08-11 11:37:00 -0700)\n"
             "# * Created on 2016-08-12T21:55:36Z\n"
             "# * Best block at time of backup was 0 (0de0a3851fef2d433b9b4f51d4342bdd24c5ddd793eb8fba57189f07e9235d52),\n"
@@ -666,9 +668,10 @@ BOOST_AUTO_TEST_CASE(rpc_wallet_z_importwallet)
     fs::path temp = fs::temp_directory_path() /
             fs::unique_path();
     const std::string path = temp.string();
-    std::ofstream file(path);
-    file << testWalletDump;
-    file << std::flush;
+    {
+        std::ofstream file(path);
+        file << testWalletDump;
+    }
 
     // wallet should currently be empty
     std::set<libzcash::SproutPaymentAddress> addrs;
@@ -679,20 +682,21 @@ BOOST_AUTO_TEST_CASE(rpc_wallet_z_importwallet)
     BOOST_CHECK_NO_THROW(CallRPC(string("z_importwallet ") + path));
 
     // wallet should now have one zkey
+    addrs.clear();
     pwalletMain->GetSproutPaymentAddresses(addrs);
-    BOOST_CHECK(addrs.size()==1);
+    BOOST_REQUIRE_EQUAL(addrs.size(), 1);
 
     // check that we have the spending key for the address
     auto decoded = keyIO.DecodePaymentAddress(testAddr);
-    BOOST_CHECK(decoded.has_value());
+    BOOST_REQUIRE(decoded.has_value());
     libzcash::PaymentAddress address(decoded.value());
     BOOST_ASSERT(std::holds_alternative<libzcash::SproutPaymentAddress>(address));
     auto sprout_addr = std::get<libzcash::SproutPaymentAddress>(address);
-    BOOST_CHECK(pwalletMain->HaveSproutSpendingKey(sprout_addr));
+    BOOST_REQUIRE(pwalletMain->HaveSproutSpendingKey(sprout_addr));
 
     // Verify the spending key is the same as the test data
     libzcash::SproutSpendingKey k;
-    BOOST_CHECK(pwalletMain->GetSproutSpendingKey(sprout_addr, k));
+    BOOST_REQUIRE(pwalletMain->GetSproutSpendingKey(sprout_addr, k));
     BOOST_CHECK_EQUAL(testKey, keyIO.EncodeSpendingKey(k));
 }
 
