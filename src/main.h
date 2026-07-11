@@ -110,6 +110,32 @@ static const int DEFAULT_SCRIPTCHECK_THREADS = 0;
 static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
 /** Timeout in seconds during which a peer must stall block download progress before being disconnected. */
 static const unsigned int BLOCK_STALLING_TIMEOUT = 2;
+/** Timeout in seconds for a peer to answer a getheaders before we re-send it.
+ *
+ * Headers sync is a strict request/response chain: each headers message triggers the next
+ * getheaders. Upstream zcashd has no timeout here, because it assumes many peers, so a peer
+ * that never answers is simply outrun by the others. This sidecar build is pinned to a single
+ * Zakura peer via -connect, so there is no other peer to pick up the slack: one unanswered
+ * getheaders stalls the chain forever, with the connection still alive and ping/pong flowing.
+ *
+ * This must comfortably exceed the peer's own inbound service timeout so a slow-but-live
+ * response is not duplicated needlessly. Zakura's inbound service timeout is 5 seconds, and
+ * a peer that closes the connection is noticed directly, without waiting for this timeout.
+ * So this only fires against a peer that goes silent without disconnecting, which is exactly
+ * the case nothing else here detects. */
+static const unsigned int HEADERS_RESPONSE_TIMEOUT = 30;
+/** While in initial block download, re-request headers from the sync peer if none have
+ * arrived for this many seconds.
+ *
+ * This is deliberately longer than HEADERS_RESPONSE_TIMEOUT so an outstanding request
+ * follows its timeout/retry path instead of overlapping a poll. Since this sidecar uses
+ * a loopback peer, one cheap request per minute bounds idle time without meaningful load. */
+static const unsigned int HEADERS_IBD_POLL_INTERVAL = 60;
+/** Number of times to re-send an unanswered getheaders before disconnecting the peer.
+ *
+ * Disconnecting is a working last resort: ThreadOpenConnections re-dials the -connect peer,
+ * which resets the peer's CNodeState and restarts headers sync from our best header. */
+static const int MAX_HEADERS_SYNC_RETRIES = 3;
 /** Number of headers sent in one getheaders result. We rely on the assumption that if a peer sends
  *  less than this number, we reached its tip. Changing this value is a protocol upgrade. */
 static const unsigned int MAX_HEADERS_RESULTS = 160;

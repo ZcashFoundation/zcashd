@@ -133,6 +133,10 @@ DEBUG_STAGING="$TMPDIR/debug"
 mkdir -p "$RUNTIME_STAGING/bin" "$DEBUG_STAGING"
 
 cp "./src/zcashd" "$RUNTIME_STAGING/bin/zcashd"
+# zcash-cli is how an operator inspects the sidecar (getblockchaininfo, getpeerinfo).
+# Without it, troubleshooting means hand-rolling curl against the cookie file. The
+# Docker image has always shipped it; the archive omitting it was an oversight.
+cp "./src/zcash-cli" "$RUNTIME_STAGING/bin/zcash-cli"
 if [[ -f "./COPYING" ]]; then
   cp "./COPYING" "$RUNTIME_STAGING/COPYING"
 fi
@@ -140,9 +144,11 @@ if [[ -f "./README.md" ]]; then
   cp "./README.md" "$RUNTIME_STAGING/README.md"
 fi
 
-"$OBJCOPY_BIN" --only-keep-debug "$RUNTIME_STAGING/bin/zcashd" "$DEBUG_STAGING/zcashd.dbg"
-"$STRIP_BIN" -s "$RUNTIME_STAGING/bin/zcashd"
-"$OBJCOPY_BIN" --add-gnu-debuglink="$DEBUG_STAGING/zcashd.dbg" "$RUNTIME_STAGING/bin/zcashd"
+for binary in zcashd zcash-cli; do
+  "$OBJCOPY_BIN" --only-keep-debug "$RUNTIME_STAGING/bin/$binary" "$DEBUG_STAGING/${binary}.dbg"
+  "$STRIP_BIN" -s "$RUNTIME_STAGING/bin/$binary"
+  "$OBJCOPY_BIN" --add-gnu-debuglink="$DEBUG_STAGING/${binary}.dbg" "$RUNTIME_STAGING/bin/$binary"
+done
 
 RUNTIME_ARCHIVE_BASENAME="zcashd-zebra-compat-${VERSION_TAG}-${PLATFORM_ID}"
 DEBUG_ARCHIVE_BASENAME="${RUNTIME_ARCHIVE_BASENAME}-debug"
@@ -183,18 +189,22 @@ python3 - <<PY
 import json
 from pathlib import Path
 
+# There is no -zebra-compat flag: this build enforces sidecar mode by requiring
+# exactly one -connect peer (see ValidateZcashdSidecarPeerLock in src/init.cpp).
+# The metadata used to advertise "required_mode_flag": "-zebra-compat", which no
+# consumer reads and which would be rejected as an unknown argument if one did.
 metadata = {
   "target_triple": "${HOST_TRIPLE}",
   "platform_id": "${PLATFORM_ID}",
   "version": "${VERSION_TAG}",
   "zcashd_version_output": "${ZCASHD_VERSION}",
   "git_commit": "${GIT_COMMIT}",
-  "required_mode_flag": "-zebra-compat",
   "runtime": {
     "archive": "${RUNTIME_ARCHIVE_BASENAME}.tar.gz",
     "sha256": "${RUNTIME_SHA256}",
     "size_bytes": int("${RUNTIME_SIZE_BYTES}"),
     "archive_member_binary_path": "./bin/zcashd",
+    "archive_member_cli_path": "./bin/zcash-cli",
     "url": "${RUNTIME_URL}",
   },
   "debug": {
@@ -202,6 +212,7 @@ metadata = {
     "sha256": "${DEBUG_SHA256}",
     "size_bytes": int("${DEBUG_SIZE_BYTES}"),
     "archive_member_debug_path": "./zcashd.dbg",
+    "archive_member_cli_debug_path": "./zcash-cli.dbg",
     "url": "${DEBUG_URL}",
   },
 }
