@@ -6266,8 +6266,15 @@ bool ContextualCheckBlockHeader(
     // on the block body, so failures are not body-replaceable and pass
     // `BodyCorruption::HeaderOnly`.
 
-    // Check proof of work
-    if (block.nBits != GetNextWorkRequired(pindexPrev, &block, consensusParams)) {
+    // Check proof of work.
+    //
+    // Regtest-only: when following a Zebra regtest chain (fAcceptUnvalidatedPoW),
+    // skip the difficulty-bits check. Zebra retargets difficulty on regtest,
+    // while stock regtest uses fixed difficulty (fPowNoRetargeting), so the
+    // nBits differ. The sidecar treats Zebra as authoritative for regtest PoW,
+    // matching the CheckEquihashSolution and CheckProofOfWork skips.
+    if (!consensusParams.fAcceptUnvalidatedPoW &&
+        block.nBits != GetNextWorkRequired(pindexPrev, &block, consensusParams)) {
         return state.DoS(100, error("%s: incorrect proof of work", __func__),
                          REJECT_INVALID, "bad-diffbits", BodyCorruption::HeaderOnly);
     }
