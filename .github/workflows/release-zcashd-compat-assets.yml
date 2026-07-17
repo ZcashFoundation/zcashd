@@ -87,8 +87,8 @@ jobs:
         if: matrix.name == 'linux-x86_64'
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
-          username: valargroup
-          password: ${{ secrets.DOCKERHUB_TOKEN_VALARGROUP }}
+          username: valaroman
+          password: ${{ secrets.DOCKERHUB_TOKEN_ZAKURA }}
 
       - name: Build and push Docker image
         if: matrix.name == 'linux-x86_64'
@@ -98,7 +98,7 @@ jobs:
           file: ./contrib/docker/source-runtime.Dockerfile
           platforms: linux/amd64
           push: true
-          tags: valargroup/zcashd:${{ steps.release-tag.outputs.value }}
+          tags: zakuracore/zcashd:${{ steps.release-tag.outputs.value }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
