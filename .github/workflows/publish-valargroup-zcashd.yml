@@ -1,4 +1,4 @@
-name: Publish valargroup zcashd Docker image
+name: Publish zakuracore zcashd Docker image
 
 on:
   release:
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-valargroup-zcashd-${{ github.ref }}
+  group: publish-zakuracore-zcashd-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -43,24 +43,24 @@ jobs:
           set -euo pipefail
 
           if [ -n "$INPUT_IMAGE_TAG" ]; then
-            tags=("valargroup/zcashd:${INPUT_IMAGE_TAG}")
+            tags=("zakuracore/zcashd:${INPUT_IMAGE_TAG}")
           elif [ "$EVENT_NAME" = "release" ]; then
             if [ -z "$RELEASE_TAG" ]; then
               echo "Unable to resolve release tag." >&2
               exit 1
             fi
 
-            tags=("valargroup/zcashd:${RELEASE_TAG}")
+            tags=("zakuracore/zcashd:${RELEASE_TAG}")
             if [[ "$RELEASE_TAG" == v* ]]; then
-              tags+=("valargroup/zcashd:${RELEASE_TAG#v}")
+              tags+=("zakuracore/zcashd:${RELEASE_TAG#v}")
             fi
           else
             REF_TAG="${INPUT_REF#refs/tags/}"
             if [[ -n "$INPUT_REF" && "$REF_TAG" == v* ]]; then
-              tags=("valargroup/zcashd:${REF_TAG}")
-              tags+=("valargroup/zcashd:${REF_TAG#v}")
+              tags=("zakuracore/zcashd:${REF_TAG}")
+              tags+=("zakuracore/zcashd:${REF_TAG#v}")
             else
-              tags=("valargroup/zcashd:commit-${GITHUB_SHA}")
+              tags=("zakuracore/zcashd:commit-${GITHUB_SHA}")
             fi
           fi
 
@@ -101,10 +101,10 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
-          username: valargroup
-          password: ${{ secrets.DOCKERHUB_TOKEN_VALARGROUP }}
+          username: valaroman
+          password: ${{ secrets.DOCKERHUB_TOKEN_ZAKURA }}
 
-      - name: Build and push to valargroup
+      - name: Build and push to zakuracore
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: ${{ runner.temp }}/zcashd-docker-context
