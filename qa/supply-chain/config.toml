@@ -806,6 +806,14 @@ criteria = "safe-to-deploy"
 version = "3.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.zcash_history]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.zcash_protocol]]
+version = "0.10.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.zcash_script]]
 version = "0.4.5"
 criteria = "safe-to-deploy"
