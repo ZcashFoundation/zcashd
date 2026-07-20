@@ -117,7 +117,7 @@ TEST_P(SpendableInputsTest, SelectsSproutBeforeFirst)
     }
 
     // Limit to 5 zatoshis (which can be satisfied by any pool).
-    EXPECT_TRUE(inputs.LimitToAmount(5, 1, recipientPools));
+    EXPECT_TRUE(inputs.LimitToAmount(5, 1, recipientPools, true));
     EXPECT_EQ(inputs.Total(), 5);
 
     if (canSelectSprout) {
@@ -168,7 +168,7 @@ TEST_P(SpendableInputsTest, SelectsSproutThenFirst)
 
     // Limit to 14 zatoshis (which requires two pools). If we only have one pool
     // available and can't select Sprout, we won't have sufficient funds.
-    auto sufficientFunds = inputs.LimitToAmount(14, 1, std::get<1>(GetParam()));
+    auto sufficientFunds = inputs.LimitToAmount(14, 1, std::get<1>(GetParam()), true);
     if (available.size() == 1 && !canSelectSprout) {
         EXPECT_FALSE(sufficientFunds);
         EXPECT_EQ(inputs.Total(), 10);
@@ -237,7 +237,7 @@ TEST_P(SpendableInputsTest, SelectsFirstBeforeSecond)
     }
 
     // Limit to 8 zatoshis (which can be satisfied by any pool).
-    EXPECT_TRUE(inputs.LimitToAmount(8, 1, std::get<1>(GetParam())));
+    EXPECT_TRUE(inputs.LimitToAmount(8, 1, std::get<1>(GetParam()), true));
     EXPECT_EQ(inputs.Total(), 8);
 
     // We use the first order and only have the first pool selected.
@@ -275,7 +275,7 @@ TEST_P(SpendableInputsTest, SelectsFirstThenSecond)
 
     // Limit to 13 zatoshis (which requires two pools).
     // If we only have one pool available, we won't have sufficient funds.
-    auto sufficientFunds = inputs.LimitToAmount(13, 1, std::get<1>(GetParam()));
+    auto sufficientFunds = inputs.LimitToAmount(13, 1, std::get<1>(GetParam()), true);
     if (available.size() == 1) {
         EXPECT_FALSE(sufficientFunds);
         EXPECT_EQ(inputs.Total(), 10);
@@ -331,7 +331,7 @@ TEST_P(SpendableInputsTest, SelectsSproutAndFirstThenSecond)
 
     // Limit to 24 zatoshis. If we only have one pool available, or we have two
     // pools but can't select Sprout, we won't have sufficient funds.
-    auto sufficientFunds = inputs.LimitToAmount(24, 1, std::get<1>(GetParam()));
+    auto sufficientFunds = inputs.LimitToAmount(24, 1, std::get<1>(GetParam()), true);
     if (available.size() == 1 || (available.size() == 2 && !canSelectSprout)) {
         EXPECT_FALSE(sufficientFunds);
         EXPECT_EQ(inputs.Total(), (canSelectSprout || available.size() == 2) ? 20 : 10);
@@ -418,13 +418,41 @@ TEST_P(SpendableInputsTest, OpportunisticShielding)
     // will trigger the opportunistic shielding logic, which causes us to select
     // all transparent notes. Because transparent is sufficient to reach the
     // target amount, we don't select any shielded notes.
-    EXPECT_TRUE(inputs.LimitToAmount(7, 1, std::get<1>(GetParam())));
+    EXPECT_TRUE(inputs.LimitToAmount(7, 1, std::get<1>(GetParam()), true));
     EXPECT_EQ(inputs.Total(), 10);
 
     EXPECT_EQ(inputs.orchardNoteMetadata.size(), 0);
     EXPECT_EQ(inputs.saplingNoteEntries.size(), 0);
     EXPECT_EQ(inputs.sproutNoteEntries.size(), 0);
     EXPECT_EQ(inputs.utxos.size(), 10);
+}
+
+TEST(SpendableInputsTest, ExcludesOrchardWhenDisallowed)
+{
+    auto wtx = FakeWalletTx();
+
+    auto mixedInputs = FakeSpendableInputs(
+            {OutputPool::Sapling, OutputPool::Orchard},
+            false,
+            &wtx);
+    EXPECT_TRUE(mixedInputs.LimitToAmount(
+            8,
+            1,
+            {OutputPool::Transparent},
+            false));
+    EXPECT_EQ(mixedInputs.saplingNoteEntries.size(), 8);
+    EXPECT_TRUE(mixedInputs.orchardNoteMetadata.empty());
+
+    auto orchardOnlyInputs = FakeSpendableInputs(
+            {OutputPool::Orchard},
+            false,
+            &wtx);
+    EXPECT_FALSE(orchardOnlyInputs.LimitToAmount(
+            8,
+            1,
+            {OutputPool::Transparent},
+            false));
+    EXPECT_EQ(orchardOnlyInputs.Total(), 0);
 }
 
 const std::set<OutputPool> SET_T({OutputPool::Transparent});
