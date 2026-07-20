@@ -9,7 +9,7 @@ NU6.3 (Ironwood) consensus support; no wallet support, ever
 
 This release adds full consensus and node support for the NU6.3 network
 upgrade, which introduces the Ironwood shielded pool (testnet activation
-height 4134000; the mainnet activation height is not yet scheduled). zcashd
+height 4134000; mainnet activation height 3428143). zcashd
 validates and follows the chain across NU6.3 activation, including blocks
 containing v6 transactions with Ironwood bundles, and exposes node-level
 observability for the new pool: an "ironwood" value pool in `getblockchaininfo`

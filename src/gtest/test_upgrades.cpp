@@ -16,6 +16,19 @@ protected:
     }
 };
 
+TEST(MainnetUpgradeTest, NU6_3Activation) {
+    const auto& params = Params(CBaseChainParams::MAIN).GetConsensus();
+    constexpr int activationHeight = 3428143;
+
+    EXPECT_EQ(
+        params.vUpgrades[Consensus::UPGRADE_NU6_3].nActivationHeight,
+        activationHeight);
+    EXPECT_FALSE(params.NetworkUpgradeActive(
+        activationHeight - 1, Consensus::UPGRADE_NU6_3));
+    EXPECT_TRUE(params.NetworkUpgradeActive(
+        activationHeight, Consensus::UPGRADE_NU6_3));
+}
+
 TEST_F(UpgradesTest, NetworkUpgradeState) {
     SelectParams(CBaseChainParams::REGTEST);
     const Consensus::Params& params = Params().GetConsensus();
