@@ -23,6 +23,9 @@ concurrency:
 jobs:
   publish:
     name: Build and publish zcashd image
+    # This workflow publishes to Zakura's Docker Hub, so it only runs on the upstream repo;
+    # forks and mirrors don't have the credentials.
+    if: github.repository == 'valargroup/zcashd' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ vars.UBUNTU_LARGE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 180
     steps:
