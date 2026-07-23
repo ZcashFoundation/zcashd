@@ -90,3 +90,30 @@ impl consensus::Parameters for Network {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use zcash_protocol::consensus::{BranchId, NetworkUpgrade, Parameters};
+
+    use super::network;
+
+    #[test]
+    fn mainnet_nu6_3_activation_matches_zcashd_consensus() {
+        const ACTIVATION_HEIGHT: u32 = 3_428_143;
+
+        let params = network("main", -1, -1, -1, -1, -1, -1, -1, -1, -1, -1).unwrap();
+
+        assert_eq!(
+            params.activation_height(NetworkUpgrade::Nu6_3),
+            Some((ACTIVATION_HEIGHT).into())
+        );
+        assert_eq!(
+            BranchId::for_height(params.as_ref(), (ACTIVATION_HEIGHT - 1).into()),
+            BranchId::Nu6_2
+        );
+        assert_eq!(
+            BranchId::for_height(params.as_ref(), ACTIVATION_HEIGHT.into()),
+            BranchId::Nu6_3
+        );
+    }
+}

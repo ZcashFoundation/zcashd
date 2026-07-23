@@ -5,6 +5,8 @@
 #ifndef ZCASH_DEPRECATION_H
 #define ZCASH_DEPRECATION_H
 
+#include "config/bitcoin-config.h"
+
 #include <optional>
 #include <set>
 #include <string>

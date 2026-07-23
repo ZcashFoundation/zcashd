@@ -985,12 +985,15 @@ public:
      * to send funds. This is used during note selection to minimise information
      * leakage. The empty set is short-hand for "all pools".
      *
+     * If `allowOrchard` is false, Orchard notes are discarded before selection.
+     *
      * This method must only be called once.
      */
     bool LimitToAmount(
         const CAmount amount,
         const CAmount dustThreshold,
-        const std::set<libzcash::OutputPool>& recipientPools);
+        const std::set<libzcash::OutputPool>& recipientPools,
+        bool allowOrchard);
 
     /**
      * Compute the total ZEC amount of spendable inputs.
