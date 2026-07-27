@@ -79,26 +79,42 @@ jobs:
             ./contrib/docker/entrypoint.sh \
             "$DOCKER_CONTEXT/"
 
-      - name: Set up Docker Buildx
+      # The Docker Hub push only runs where the Zakura credentials exist (the upstream
+      # valargroup repo). Secrets are unavailable in `if:` expressions, so probe via env.
+      - name: Check for Docker Hub credentials
+        id: dockerhub
         if: matrix.name == 'linux-x86_64'
+        shell: bash
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN_ZAKURA }}
+        run: |
+          if [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "DOCKERHUB_TOKEN_ZAKURA is not set; skipping the Docker Hub push." >&2
+          fi
+
+      - name: Set up Docker Buildx
+        if: matrix.name == 'linux-x86_64' && steps.dockerhub.outputs.available == 'true'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to Docker Hub
-        if: matrix.name == 'linux-x86_64'
+        if: matrix.name == 'linux-x86_64' && steps.dockerhub.outputs.available == 'true'
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
-          username: valargroup
-          password: ${{ secrets.DOCKERHUB_TOKEN_VALARGROUP }}
+          username: valaroman
+          password: ${{ secrets.DOCKERHUB_TOKEN_ZAKURA }}
 
       - name: Build and push Docker image
-        if: matrix.name == 'linux-x86_64'
+        if: matrix.name == 'linux-x86_64' && steps.dockerhub.outputs.available == 'true'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: ${{ runner.temp }}/zcashd-docker-context
           file: ./contrib/docker/source-runtime.Dockerfile
           platforms: linux/amd64
           push: true
-          tags: valargroup/zcashd:${{ steps.release-tag.outputs.value }}
+          tags: zakuracore/zcashd:${{ steps.release-tag.outputs.value }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}

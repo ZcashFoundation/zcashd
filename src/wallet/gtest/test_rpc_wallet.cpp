@@ -19,6 +19,8 @@
 #include <rust/bridge.h>
 #include <rust/ed25519.h>
 
+#include <stdexcept>
+
 namespace
 {
 bool find_error(const UniValue& objError, const std::string& expected) {
@@ -31,6 +33,85 @@ CWalletTx FakeWalletTx() {
     mtx.vout[0].nValue = 1;
     return CWalletTx(nullptr, mtx);
 }
+
+SpendableInputs MixedSaplingAndOrchardInputs(
+        const SaplingPaymentAddress& saplingAddress,
+        CAmount value)
+{
+    SpendableInputs inputs;
+    inputs.saplingNoteEntries.push_back(SaplingNoteEntry{
+        SaplingOutPoint{},
+        saplingAddress,
+        SaplingNote(saplingAddress, value, Zip212Enabled::AfterZip212),
+        {},
+        100});
+
+    auto seed = MnemonicSeed::Random(0);
+    auto orchardKey = OrchardSpendingKey::ForAccount(seed, 0, 0);
+    auto orchardAddress = orchardKey.ToFullViewingKey()
+        .ToIncomingViewingKey()
+        .Address(diversifier_index_t{0});
+    inputs.orchardNoteMetadata.push_back(OrchardNoteMetadata{
+        OrchardOutPoint{},
+        orchardAddress,
+        value,
+        {}});
+
+    return inputs;
+}
+
+class ScopedFakeChainTip
+{
+private:
+    uint256 blockHash;
+    CBlockIndex fakeIndex;
+    CBlockIndex* previousTip;
+
+public:
+    explicit ScopedFakeChainTip(const CBlock& block)
+        : blockHash(block.GetHash()),
+          fakeIndex(block),
+          previousTip(chainActive.Tip())
+    {
+        if (!mapBlockIndex.insert(std::make_pair(blockHash, &fakeIndex)).second) {
+            throw std::runtime_error("Fake block is already present in mapBlockIndex");
+        }
+        chainActive.SetTip(&fakeIndex);
+    }
+
+    ~ScopedFakeChainTip()
+    {
+        chainActive.SetTip(previousTip);
+        mapBlockIndex.erase(blockHash);
+    }
+
+    CBlockIndex* Get()
+    {
+        return &fakeIndex;
+    }
+
+    ScopedFakeChainTip(const ScopedFakeChainTip&) = delete;
+    ScopedFakeChainTip& operator=(const ScopedFakeChainTip&) = delete;
+};
+
+class ScopedNU6point3Wallet
+{
+public:
+    ScopedNU6point3Wallet()
+    {
+        RegtestActivateNU6point3();
+        LoadGlobalWallet();
+    }
+
+    ~ScopedNU6point3Wallet()
+    {
+        RegtestDeactivateNU6point3();
+        UnloadGlobalWallet();
+    }
+
+    ScopedNU6point3Wallet(const ScopedNU6point3Wallet&) = delete;
+    ScopedNU6point3Wallet& operator=(const ScopedNU6point3Wallet&) = delete;
+};
 
 /// Expects that the fee calculated during transaction construction matches the fee used by block
 /// construction. It allows the fee included in the transaction to be `MARGINAL_FEE` higher than the
@@ -150,6 +231,109 @@ TEST(WalletRPCTests, PrepareTransaction)
     // Revert to default
     RegtestDeactivateSapling();
     UnloadGlobalWallet();
+}
+
+TEST(WalletRPCTests, PrepareTransactionAvoidsOrchardAfterNU6point3)
+{
+    ScopedNU6point3Wallet wallet;
+
+    {
+        LOCK2(cs_main, pwalletMain->cs_wallet);
+
+        if (!pwalletMain->HaveMnemonicSeed()) {
+            pwalletMain->GenerateNewSeed();
+        }
+
+        EXPECT_EQ(-1, chainActive.Height());
+        CBlock block;
+        block.hashMerkleRoot = BlockMerkleRoot(block);
+        ScopedFakeChainTip fakeTip(block);
+        EXPECT_TRUE(chainActive.Contains(fakeTip.Get()));
+        EXPECT_EQ(0, chainActive.Height());
+
+        auto [ufvk, accountId] = pwalletMain->GenerateNewUnifiedSpendingKey();
+        auto selector = pwalletMain->ZTXOSelectorForAccount(
+                accountId,
+                true,
+                TransparentCoinbasePolicy::Disallow).value();
+        auto sourceSaplingAddress =
+            ufvk.GetSaplingKey().value().FindAddress(diversifier_index_t{0}).first;
+
+        WalletTxBuilder builder(Params(), minRelayTxFee);
+
+        auto transparentRecipient = pwalletMain->GenerateNewKey(true).GetID();
+        std::vector<Payment> transparentPayments{
+            Payment(transparentRecipient, COIN, std::nullopt)};
+        auto transparentEffects = builder.PrepareTransaction(
+                *pwalletMain,
+                selector,
+                MixedSaplingAndOrchardInputs(sourceSaplingAddress, 2 * COIN),
+                transparentPayments,
+                chainActive,
+                TransactionStrategy(PrivacyPolicy::AllowRevealedRecipients),
+                MINIMUM_FEE,
+                1);
+        ASSERT_TRUE(transparentEffects.has_value());
+        EXPECT_EQ(transparentEffects->GetSpendable().GetSaplingTotal(), 2 * COIN);
+        EXPECT_EQ(transparentEffects->GetSpendable().GetOrchardTotal(), 0);
+        EXPECT_TRUE(transparentEffects->GetPayments().HasSaplingRecipient());
+        EXPECT_FALSE(transparentEffects->GetPayments().HasOrchardRecipient());
+
+        auto orchardOnlyInputs =
+            MixedSaplingAndOrchardInputs(sourceSaplingAddress, 2 * COIN);
+        orchardOnlyInputs.saplingNoteEntries.clear();
+        auto orchardOnlyResult = builder.PrepareTransaction(
+                *pwalletMain,
+                selector,
+                orchardOnlyInputs,
+                transparentPayments,
+                chainActive,
+                TransactionStrategy(PrivacyPolicy::AllowRevealedRecipients),
+                MINIMUM_FEE,
+                1);
+        ASSERT_FALSE(orchardOnlyResult.has_value());
+        EXPECT_TRUE(std::holds_alternative<IronwoodUnsupportedError>(
+                orchardOnlyResult.error()));
+
+        auto genuinelyInsufficientResult = builder.PrepareTransaction(
+                *pwalletMain,
+                selector,
+                MixedSaplingAndOrchardInputs(sourceSaplingAddress, COIN / 10),
+                transparentPayments,
+                chainActive,
+                TransactionStrategy(PrivacyPolicy::AllowRevealedRecipients),
+                MINIMUM_FEE,
+                1);
+        ASSERT_FALSE(genuinelyInsufficientResult.has_value());
+        EXPECT_TRUE(std::holds_alternative<InvalidFundsError>(
+                genuinelyInsufficientResult.error()));
+
+        auto destinationSaplingKey = pwalletMain->GenerateNewLegacySaplingZKey();
+        auto orchardSeed = MnemonicSeed::Random(0);
+        auto destinationOrchardKey = OrchardSpendingKey::ForAccount(orchardSeed, 0, 0);
+        auto destinationOrchardAddress = destinationOrchardKey.ToFullViewingKey()
+            .ToIncomingViewingKey()
+            .Address(diversifier_index_t{0});
+        UnifiedAddress unifiedRecipient;
+        ASSERT_TRUE(unifiedRecipient.AddReceiver(destinationOrchardAddress));
+        ASSERT_TRUE(unifiedRecipient.AddReceiver(destinationSaplingKey));
+
+        std::vector<Payment> unifiedPayments{
+            Payment(unifiedRecipient, COIN, std::nullopt)};
+        auto unifiedEffects = builder.PrepareTransaction(
+                *pwalletMain,
+                selector,
+                MixedSaplingAndOrchardInputs(sourceSaplingAddress, 2 * COIN),
+                unifiedPayments,
+                chainActive,
+                TransactionStrategy(PrivacyPolicy::FullPrivacy),
+                MINIMUM_FEE,
+                1);
+        ASSERT_TRUE(unifiedEffects.has_value());
+        EXPECT_EQ(unifiedEffects->GetSpendable().GetOrchardTotal(), 0);
+        EXPECT_TRUE(unifiedEffects->GetPayments().HasSaplingRecipient());
+        EXPECT_FALSE(unifiedEffects->GetPayments().HasOrchardRecipient());
+    }
 }
 
 // TODO: test private methods

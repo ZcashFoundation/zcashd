@@ -7901,7 +7901,8 @@ void SpendableInputs::LimitTransparentUtxos(size_t maxUtxoCount)
 bool SpendableInputs::LimitToAmount(
     const CAmount amountRequired,
     const CAmount dustThreshold,
-    const std::set<OutputPool>& recipientPools)
+    const std::set<OutputPool>& recipientPools,
+    bool allowOrchard)
 {
     // dustThreshold cannot be zero because it is no longer configured via `-minrelaytxfee`.
     assert(amountRequired >= 0 && dustThreshold > 0);
@@ -7949,13 +7950,16 @@ bool SpendableInputs::LimitToAmount(
         [](CAmount acc, const SaplingNoteEntry& entry) {
             return acc + entry.note.value();
         });
+    if (!allowOrchard) {
+        orchardNoteMetadata.clear();
+    }
     CAmount availableOrchard = std::accumulate(
-        orchardNoteMetadata.begin(),
-        orchardNoteMetadata.end(),
-        CAmount(0),
-        [](CAmount acc, const OrchardNoteMetadata& entry) {
-            return acc + entry.GetNoteValue();
-        });
+            orchardNoteMetadata.begin(),
+            orchardNoteMetadata.end(),
+            CAmount(0),
+            [](CAmount acc, const OrchardNoteMetadata& entry) {
+                return acc + entry.GetNoteValue();
+            });
     assert(availableTransparent >= 0);
     assert(availableSapling >= 0);
     assert(availableOrchard >= 0);

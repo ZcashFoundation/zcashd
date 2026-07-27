@@ -232,9 +232,10 @@ ResolveNetPayment(
         const std::optional<CAmount>& fee,
         const TransactionStrategy& strategy,
         bool afterNU5,
+        bool allowOrchard,
         uint32_t consensusBranchId)
 {
-    bool canResolveOrchard = afterNU5 && !selector.SelectsSprout();
+    bool canResolveOrchard = afterNU5 && allowOrchard && !selector.SelectsSprout();
     CAmount maxSaplingAvailable = spendable.GetSaplingTotal();
     CAmount maxOrchardAvailable = spendable.GetOrchardTotal();
     uint32_t orchardOutputs{0};
@@ -283,7 +284,8 @@ WalletTxBuilder::GetChangeAddress(
         const SpendableInputs& spendable,
         const Payments& resolvedPayments,
         const TransactionStrategy& strategy,
-        bool afterNU5) const
+        bool afterNU5,
+        bool allowOrchard) const
 {
     // Determine the account we're sending from.
     auto sendFromAccount = wallet.FindAccountForSelector(selector).value_or(ZCASH_LEGACY_ACCOUNT);
@@ -308,7 +310,7 @@ WalletTxBuilder::GetChangeAddress(
                     }
                     break;
                 case ReceiverType::Orchard:
-                    if (afterNU5
+                    if (afterNU5 && allowOrchard
                         && (!spendable.orchardNoteMetadata.empty() || strategy.AllowRevealedAmounts())) {
                         result.insert(OutputPool::Orchard);
                     }
@@ -433,28 +435,66 @@ WalletTxBuilder::PrepareTransaction(
     auto consensus = params.GetConsensus();
     int anchorHeight = GetAnchorHeight(chain, anchorConfirmations);
     bool afterNU5 = consensus.NetworkUpgradeActive(anchorHeight, Consensus::UPGRADE_NU5);
+    bool allowOrchard =
+        !consensus.NetworkUpgradeActive(chain.Height() + 1, Consensus::UPGRADE_NU6_3);
+    SpendableInputs selectable = spendable;
+    if (!allowOrchard) {
+        selectable.orchardNoteMetadata.clear();
+    }
     auto consensusBranchId = CurrentEpochBranchId(chain.Height(), consensus);
     auto selected = examine(payments, match {
             [&](const std::vector<Payment>& payments) {
                 return ResolveInputsAndPayments(
                         wallet,
                         selector,
-                        spendable,
+                        selectable,
                         payments,
                         strategy,
                         fee,
                         afterNU5,
+                        allowOrchard,
                         consensusBranchId);
             },
             [&](const NetAmountRecipient& netRecipient) {
-                return ResolveNetPayment(wallet, selector, spendable, netRecipient, fee, strategy, afterNU5, consensusBranchId)
+                return ResolveNetPayment(
+                        wallet,
+                        selector,
+                        selectable,
+                        netRecipient,
+                        fee,
+                        strategy,
+                        afterNU5,
+                        allowOrchard,
+                        consensusBranchId)
                     .map([&](const auto& pair) {
                         const auto& [payment, finalFee] = pair;
-                        return InputSelection(spendable, {{payment}}, finalFee, std::nullopt);
+                        return InputSelection(selectable, {{payment}}, finalFee, std::nullopt);
                     });
             },
         });
     if (!selected.has_value()) {
+        // If supported pools cannot fund the transaction but adding the excluded
+        // Orchard balance would have made the amount sufficient, report the
+        // intentional NU6.3 wallet restriction rather than "insufficient funds".
+        // This keeps Orchard-only and Orchard-dependent accounts fail-closed
+        // without hiding the actual reason their visible balance cannot be spent.
+        if (!allowOrchard && spendable.GetOrchardTotal() > 0) {
+            const auto* invalidFunds = std::get_if<InvalidFundsError>(&selected.error());
+            if (invalidFunds != nullptr) {
+                const auto* insufficient =
+                    std::get_if<InsufficientFundsError>(&invalidFunds->reason);
+                if (insufficient != nullptr) {
+                    auto total = spendable.Total();
+                    auto required = insufficient->required;
+                    if (total == required
+                        || (total > required
+                            && total - required > DefaultDustThreshold()))
+                    {
+                        return tl::make_unexpected(IronwoodUnsupportedError());
+                    }
+                }
+            }
+        }
         return tl::make_unexpected(selected.error());
     }
     const auto& resolvedSelection = selected.value();
@@ -594,6 +634,7 @@ WalletTxBuilder::IterateLimit(
         const SpendableInputs& spendable,
         Payments& resolved,
         bool afterNU5,
+        bool allowOrchard,
         uint32_t consensusBranchId) const
 {
     SpendableInputs spendableMut;
@@ -620,7 +661,8 @@ WalletTxBuilder::IterateLimit(
             spendableMut.LimitToAmount(
                     targetAmount + bumpTargetAmount,
                     dustThreshold,
-                    resolved.GetRecipientPools());
+                    resolved.GetRecipientPools(),
+                    allowOrchard);
         changeAmount = spendableMut.Total() - targetAmount;
         if (foundSufficientFunds) {
             // Don’t want to generate a change address if we don’t need one (because it could be
@@ -633,7 +675,8 @@ WalletTxBuilder::IterateLimit(
                         spendableMut,
                         resolved,
                         strategy,
-                        afterNU5);
+                        afterNU5,
+                        allowOrchard);
 
                 if (maybeChangeAddr.has_value()) {
                     changeAddr = maybeChangeAddr.value();
@@ -690,6 +733,7 @@ WalletTxBuilder::ResolveInputsAndPayments(
         const TransactionStrategy& strategy,
         const std::optional<CAmount>& fee,
         bool afterNU5,
+        bool allowOrchard,
         uint32_t consensusBranchId) const
 {
     LOCK2(cs_main, wallet.cs_wallet);
@@ -705,7 +749,7 @@ WalletTxBuilder::ResolveInputsAndPayments(
 
     // we can only select Orchard addresses if we’re not sending from Sprout, since there is no tx
     // version where both Sprout and Orchard are valid.
-    bool canResolveOrchard = afterNU5 && !selector.SelectsSprout();
+    bool canResolveOrchard = afterNU5 && allowOrchard && !selector.SelectsSprout();
     std::vector<ResolvedPayment> resolvedPayments;
     std::optional<AddressResolutionError> resolutionError;
     for (const auto& payment : payments) {
@@ -749,7 +793,8 @@ WalletTxBuilder::ResolveInputsAndPayments(
         bool foundSufficientFunds = spendableMut.LimitToAmount(
                 targetAmount,
                 dustThreshold,
-                resolved.GetRecipientPools());
+                resolved.GetRecipientPools(),
+                allowOrchard);
         CAmount changeAmount{spendableMut.Total() - targetAmount};
         if (!foundSufficientFunds) {
             return tl::make_unexpected(
@@ -768,7 +813,8 @@ WalletTxBuilder::ResolveInputsAndPayments(
                     spendableMut,
                     resolved,
                     strategy,
-                    afterNU5);
+                    afterNU5,
+                    allowOrchard);
 
             if (maybeChangeAddr.has_value()) {
                 changeAddr = maybeChangeAddr.value();
@@ -798,7 +844,17 @@ WalletTxBuilder::ResolveInputsAndPayments(
             }
         }
     } else {
-        auto limitResult = IterateLimit(wallet, selector, strategy, sendAmount, dustThreshold, spendable, resolved, afterNU5, consensusBranchId);
+        auto limitResult = IterateLimit(
+                wallet,
+                selector,
+                strategy,
+                sendAmount,
+                dustThreshold,
+                spendable,
+                resolved,
+                afterNU5,
+                allowOrchard,
+                consensusBranchId);
         if (limitResult.has_value()) {
             std::tie(spendableMut, finalFee, changeAddr) = limitResult.value();
             targetAmount = sendAmount + finalFee;

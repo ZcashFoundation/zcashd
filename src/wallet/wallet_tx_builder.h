@@ -403,7 +403,8 @@ private:
             const SpendableInputs& spendable,
             const Payments& resolvedPayments,
             const TransactionStrategy& strategy,
-            bool afterNU5) const;
+            bool afterNU5,
+            bool allowOrchard) const;
 
     tl::expected<
         std::tuple<SpendableInputs, CAmount, std::optional<ChangeAddress>>,
@@ -417,6 +418,7 @@ private:
             const SpendableInputs& spendable,
             Payments& resolved,
             bool afterNU5,
+            bool allowOrchard,
             uint32_t consensusBranchId) const;
 
     /**
@@ -433,6 +435,7 @@ private:
             const TransactionStrategy& strategy,
             const std::optional<CAmount>& fee,
             bool afterNU5,
+            bool allowOrchard,
             uint32_t consensusBranchId) const;
     /**
      * Compute the internal and external OVKs to use in transaction construction, given
