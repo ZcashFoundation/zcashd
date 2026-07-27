@@ -41,6 +41,9 @@ jobs:
             exit 1
           fi
           echo "value=$TAG" >> "$GITHUB_OUTPUT"
+          # This repository tags sidecar releases as zebra-compat-vX.Y.Z, but the
+          # packaging script and artifact names use the bare vX.Y.Z version.
+          echo "version=${TAG#zebra-compat-}" >> "$GITHUB_OUTPUT"
 
       - name: Install cross-compilation dependencies
         if: matrix.cross_deps != ''
@@ -57,7 +60,7 @@ jobs:
           chmod +x ./zcutil/package-zcashd-compat.sh
           ./zcutil/package-zcashd-compat.sh \
             --host "${{ matrix.host }}" \
-            --version "${{ steps.release-tag.outputs.value }}" \
+            --version "${{ steps.release-tag.outputs.version }}" \
             --output-dir "./artifacts/${{ matrix.name }}"
 
       - name: Prepare Docker build context
