@@ -74,6 +74,7 @@ BASE_SCRIPTS= [
     'orchard_reorg.py',
     'fundrawtransaction.py',
     'reorg_limit.py',
+    'reorg_limit_shielded.py',
     'mempool_limit.py',
     'p2p-fullblocktest.py',
     'soft_fork_disabling_orchard.py',

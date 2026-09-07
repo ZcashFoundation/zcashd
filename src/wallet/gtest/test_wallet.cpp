@@ -1756,8 +1756,11 @@ TEST(WalletTests, CachedWitnessesCleanIndex) {
     auto sk = libzcash::SproutSpendingKey::random();
     wallet.AddSproutSpendingKey(sk);
 
-    // Generate a chain
-    size_t numBlocks = WITNESS_CACHE_SIZE + 10;
+    // Generate a chain. This test is quadratic in `numBlocks` (every block is
+    // re-witnessed against every note), so it is deliberately not tied to
+    // WITNESS_CACHE_SIZE, which is now 1001; it exercises the reindex and
+    // decrement paths, not the cache ceiling.
+    size_t numBlocks = 109;
     blocks.resize(numBlocks);
     indices.resize(numBlocks);
     for (size_t i = 0; i < numBlocks; i++) {

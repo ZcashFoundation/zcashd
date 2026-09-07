@@ -252,10 +252,16 @@ pub fn write_checkpoint_v3<W: Write>(
 /// such data the returned identifiers will *not* correspond to block heights. As such, checkpoint
 /// ids should always be treated as opaque, totally ordered identifiers without additional
 /// semantics.
+///
+/// The serialized `max_checkpoints` value is consumed (so that the serialization format is
+/// unchanged) but ignored in favour of the `max_checkpoints` argument. This allows the
+/// checkpoint depth of existing wallet files to be raised, instead of them being pinned
+/// forever to the value they were written with.
 #[allow(clippy::needless_borrows_for_generic_args)]
 #[allow(clippy::redundant_closure)]
 pub fn read_tree<H: Hashable + HashSer + Ord + Clone, const DEPTH: u8, R: Read>(
     mut reader: R,
+    max_checkpoints: usize,
 ) -> io::Result<BridgeTree<H, u32, DEPTH>> {
     let tree_version = reader.read_u8()?;
     let prior_bridges = Vector::read(&mut reader, |r| read_bridge(r, tree_version))?;
@@ -291,7 +297,9 @@ pub fn read_tree<H: Hashable + HashSer + Ord + Clone, const DEPTH: u8, R: Read>(
             format!("Unrecognized tree serialization version: {:?}", flag),
         )),
     }?;
-    let max_checkpoints = read_leu64_usize(&mut reader)?;
+    // Consume the serialized checkpoint depth, but use the depth requested by the caller: the
+    // wallet's reorg tolerance is a property of the current node, not of the file on disk.
+    let _serialized_max_checkpoints = read_leu64_usize(&mut reader)?;
 
     BridgeTree::from_parts(
         prior_bridges,

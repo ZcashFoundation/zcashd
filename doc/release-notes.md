@@ -79,3 +79,34 @@ compatibility release. Integrators are encouraged to migrate to
 [Zakura](https://github.com/zakura-core/zakura) and monitor its
 [CHANGELOG](https://github.com/zakura-core/zakura/blob/main/CHANGELOG.md).
 
+
+Maximum reorg length raised to 1000 blocks
+------------------------------------------
+
+`zcashd` now accepts chain reorganizations up to 1000 blocks deep, instead of 99.
+This matches Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`), so a
+`zcashd` node no longer shuts itself down on a reorg that Zebra survives. The
+node still shuts down with the same message for reorgs deeper than the new
+limit.
+
+Three limits were raised together, since the node threshold cannot move on its
+own:
+
+- `MAX_REORG_LENGTH` is now 1000, and is no longer derived from the
+  consensus-critical `COINBASE_MATURITY`, which is unchanged.
+- The wallet's Sprout and Sapling witness cache (`WITNESS_CACHE_SIZE`) follows
+  it to 1001 entries.
+- The wallet's Orchard note commitment tree now retains 1001 checkpoints, and
+  existing `wallet.dat` files are upgraded to the new checkpoint depth on load.
+  The wallet serialization format is unchanged, so downgrading is still
+  possible; a downgraded node will simply go back to retaining 100 checkpoints.
+
+`MIN_BLOCKS_TO_KEEP` was raised to 1001 to match, so that a pruned node can
+still perform a reorg of the maximum accepted length. The default for
+`-checkblocks` is pinned at 288 and so is unaffected.
+
+Wallets holding shielded notes should expect witness cache memory and
+`wallet.dat` size to grow by roughly 10x, since one witness per block is
+retained for each tracked note. The growth is gradual: the cache grows by one
+entry per connected block, so an upgraded wallet takes around 900 blocks to
+reach the new ceiling.

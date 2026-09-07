@@ -60,8 +60,12 @@ class PrecomputedTransactionData;
 
 struct CNodeStateStats;
 
-/** Maximum reorg length we will accept before we shut down and alert the user. */
-static const unsigned int MAX_REORG_LENGTH = COINBASE_MATURITY - 1;
+/** Maximum reorg length we will accept before we shut down and alert the user.
+ *  This matches Zebra's `MAX_BLOCK_REORG_HEIGHT`, so that a node running in
+ *  sidecar compat mode does not shut down on reorgs that Zebra survives. It is
+ *  deliberately not derived from COINBASE_MATURITY, which is consensus-critical
+ *  and must not change. */
+static const unsigned int MAX_REORG_LENGTH = 1000;
 /** Default for DEFAULT_WHITELISTRELAY. */
 static const bool DEFAULT_WHITELISTRELAY = true;
 /** Default for DEFAULT_WHITELISTFORCERELAY. */
@@ -260,10 +264,15 @@ extern bool fHavePruned;
 extern bool fPruneMode;
 /** Number of MiB of block files that we're trying to stay below. */
 extern uint64_t nPruneTarget;
-/** Block files containing a block-height within MIN_BLOCKS_TO_KEEP of chainActive.Tip() will not be pruned. */
-static const unsigned int MIN_BLOCKS_TO_KEEP = 288;
+/** Block files containing a block-height within MIN_BLOCKS_TO_KEEP of chainActive.Tip() will not be pruned.
+ *  This must be greater than MAX_REORG_LENGTH, otherwise a pruned node cannot
+ *  physically perform a reorg of the maximum accepted length. */
+static const unsigned int MIN_BLOCKS_TO_KEEP = MAX_REORG_LENGTH + 1;
 
-static const signed int DEFAULT_CHECKBLOCKS = MIN_BLOCKS_TO_KEEP;
+/** Default number of blocks to verify on startup. Pinned rather than derived
+ *  from MIN_BLOCKS_TO_KEEP so that raising the reorg limit does not make
+ *  startup verification correspondingly slower. */
+static const signed int DEFAULT_CHECKBLOCKS = 288;
 static const unsigned int DEFAULT_CHECKLEVEL = 3;
 
 /** Prefer to create v4 transactions. */

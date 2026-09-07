@@ -15,7 +15,7 @@ the Blossom activation; height then, the network is split and each branch of
 the network produces blocks into the range of the upgraded protocol.
 
 The node that is not aware of Blossom activation is advanced beyond the maximum
-reorg length of 99 blocks, then that node is shut down. When the node is
+reorg length of MAX_REORG_LENGTH blocks, then that node is shut down. When the node is
 restarted with knowledge of the network activation height the checks on startup
 identify a need to reorg to come into agreement with the rest of the network.
 However, since the rollback required is greater than the maximum reorg length,
@@ -38,8 +38,16 @@ import sys
 
 logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO, stream=sys.stdout)
 
+# Must match MAX_REORG_LENGTH in src/main.h.
+MAX_REORG_LENGTH = 1000
+# The number of blocks the lagging node mines past the split; must exceed
+# MAX_REORG_LENGTH so that the rewind on restart is rejected.
+LAGGING_BLOCKS = MAX_REORG_LENGTH + 10
+
 HAS_SAPLING = [nuparams(OVERWINTER_BRANCH_ID, 10), nuparams(SAPLING_BRANCH_ID, 15)]
-NO_SAPLING = [nuparams(OVERWINTER_BRANCH_ID, 10), nuparams(SAPLING_BRANCH_ID, 150)]
+# The lagging node must not reach its own Sapling activation height while mining
+# LAGGING_BLOCKS blocks past height 14, or it would no longer be Sapling-unaware.
+NO_SAPLING = [nuparams(OVERWINTER_BRANCH_ID, 10), nuparams(SAPLING_BRANCH_ID, 14 + LAGGING_BLOCKS + 100)]
 
 class SaplingRewindTest(BitcoinTestFramework):
     def __init__(self):
@@ -82,8 +90,8 @@ class SaplingRewindTest(BitcoinTestFramework):
         self.nodes[0].generate(50) 
         expected = self.nodes[0].getbestblockhash()
 
-        # generate blocks into sapling beyond the maximum rewind length (99 blocks)
-        self.nodes[2].generate(120) 
+        # generate blocks into sapling beyond the maximum rewind length
+        self.nodes[2].generate(LAGGING_BLOCKS) 
         self.sync_all()
 
         assert_true(expected != self.nodes[2].getbestblockhash(), "Split chains have not diverged!")
@@ -98,7 +106,7 @@ class SaplingRewindTest(BitcoinTestFramework):
 
         # expect an exception; the node will refuse to fully start because its last point of
         # agreement with the rest of the network was prior to the network upgrade activation
-        assert_start_raises_init_error(2, self.options.tmpdir, HAS_SAPLING, "roll back 120")
+        assert_start_raises_init_error(2, self.options.tmpdir, HAS_SAPLING, "roll back %d" % LAGGING_BLOCKS)
 
         # restart the node with -reindex to allow the test to complete gracefully,
         # otherwise the node shutdown call in test cleanup will throw an error since

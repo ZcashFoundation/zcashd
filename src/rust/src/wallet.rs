@@ -32,7 +32,12 @@ use crate::{
     zcashd_orchard::OrderedAddress,
 };
 
-pub const MAX_CHECKPOINTS: usize = 100;
+/// The number of checkpoints of the Orchard note commitment tree that the wallet
+/// retains, and therefore the maximum number of blocks that `Wallet::rewind` can
+/// roll back. This must be at least `MAX_REORG_LENGTH + 1` (see `src/main.h`),
+/// because `CWallet::DecrementNoteWitnesses` wraps the rewind FFI call in an
+/// `assert()`.
+pub const MAX_CHECKPOINTS: usize = 1001;
 
 /// A data structure tracking the last transaction whose notes
 /// have been added to the wallet's note commitment tree.
@@ -1335,7 +1340,7 @@ pub extern "C" fn orchard_wallet_load_note_commitment_tree(
         let last_checkpoint = Optional::read(&mut reader, |r| {
             r.read_u32::<LittleEndian>().map(BlockHeight::from)
         })?;
-        let commitment_tree = read_tree(&mut reader)?;
+        let commitment_tree = read_tree(&mut reader, MAX_CHECKPOINTS)?;
 
         // Read note positions.
         wallet.wallet_note_positions = Vector::read_collected(&mut reader, |mut r| {
