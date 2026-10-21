@@ -9,11 +9,14 @@ NU7 consensus support
 
 This release adds consensus support for the NU7 network upgrade (the ZIP 259
 set, consensus branch ID `0x77190ad9`). NU7 activated on Testnet at height
-4,465,026 on 2026-10-04, as in Zakura v1.6.0, and v1.1.x sidecars cannot
+4,465,026 on 2026-10-04, and zebra-compat-v1.2.0 and earlier sidecars cannot
 follow Testnet past that height. Mainnet NU7 is scheduled at height 3,543,405,
-matching Zakura's Mainnet schedule. Upgrade before that height to keep following
-Mainnet. Run this release behind a Zakura version that supports NU7 on the
-selected network.
+matching Zebra's Mainnet schedule. Upgrade before that height to keep following
+Mainnet.
+
+Run this release behind Zebra 7.0.0 or later. From NU7 activation, Zebra and
+the sidecar each disconnect a peer that advertises an older protocol version,
+so both must be upgraded.
 
 From NU7:
 
@@ -34,8 +37,8 @@ From NU7:
   invalid.
 
 The protocol version is now 170190, the Mainnet NU7 version. The Rust crates
-are Zakura Common 2.2.0. A CI job checks zcashd's NU7 consensus values
-against Zakura's.
+are Zakura Common 2.2.0, Zakura's forks of the Zcash protocol and cryptography
+crates. A CI job checks zcashd's NU7 consensus values against Zakura's.
 
 Action required for Sprout users BEFORE NU7 activation
 ------------------------------------------------------
@@ -62,9 +65,9 @@ Wallet changes from NU7
 Deeper reorgs: wallet and pruning impact
 ----------------------------------------
 
-zcashd now accepts reorgs of up to 1000 blocks (previously 99), matching
-Zakura's `MAX_BLOCK_REORG_HEIGHT`, so the sidecar follows every reorg Zakura
-does. This has costs for wallets and pruned nodes:
+Since zebra-compat-v1.2.0, zcashd accepts reorgs of up to 1000 blocks
+(previously 99), matching Zebra's `MAX_BLOCK_REORG_HEIGHT`, so the sidecar
+follows every reorg Zebra does. This has costs for wallets and pruned nodes:
 
 - **Larger wallets.** The wallet keeps 1001 cached witnesses for each unspent
   Sprout or Sapling note (previously 100), about 10 times the memory and disk
@@ -72,12 +75,16 @@ does. This has costs for wallets and pruned nodes:
   anyone who knows a Sapling address can send it notes, a wallet sent many small
   "dust" notes grows accordingly: at least about 600 MiB per ZEC the sender
   spends on fees.
-- **One-way wallet upgrade.** zcashd v1.1.x cannot load a wallet written by
-  this release. Back up `wallet.dat` before upgrading.
-- **Reorg tolerance builds up after upgrading.** An upgraded wallet starts with
-  only the last 100 blocks of history and reaches the full 1000 over the next
-  900 or so blocks. A reorg as deep as its history or deeper, in that window,
-  stops the node; restart with `-rescan`.
+- **One-way wallet upgrade.** zebra-compat-v1.1.0 and earlier abort on a
+  wallet written by zebra-compat-v1.2.0 or later, once one of its notes has
+  more than 100 cached witnesses. This corrects the zebra-compat-v1.2.0 release
+  notes, which said that downgrading still worked. Back up `wallet.dat` before
+  upgrading from zebra-compat-v1.1.0 or earlier.
+- **Reorg tolerance builds up after upgrading.** A wallet upgraded from
+  zebra-compat-v1.1.0 or earlier starts with only the last 100 blocks of
+  history and reaches the full 1000 over the next 900 or so blocks. A reorg as
+  deep as its history or deeper, in that window, stops the node; restart with
+  `-rescan`.
 - **Pruned nodes keep more blocks.** A pruned node keeps the last 1001 blocks
   (previously 288). With large blocks this can exceed the 550 MiB minimum
   `-prune` target, so allow at least 2 GiB. A recently upgraded pruned node has
@@ -87,11 +94,12 @@ does. This has costs for wallets and pruned nodes:
 Mempool around network upgrades
 -------------------------------
 
-Zakura bans a peer that relays a transaction it rejects, and Zakura may be a few
-blocks ahead of the sidecar. The mempool therefore also checks each transaction
-at the highest height Zakura could check it at (3 blocks past the next block,
-or past the block after Zakura's best header), and drops any it holds that are
-no longer valid there.
+Zebra penalizes a peer that relays a transaction it rejects (it bans the peer
+once its misbehavior score reaches 100), and Zebra may be a few blocks ahead of
+the sidecar. The mempool therefore also checks each transaction at the highest
+height Zebra could check it at (3 blocks past the next block, or past the block
+after Zebra's best header), and drops any it holds that are no longer valid
+there.
 
 So in the last few blocks before an upgrade activates, the mempool refuses new
 transactions with `tx-invalid-at-relay-height`, and drops the ones it holds.
@@ -111,7 +119,7 @@ Other fixes
 
 - v6 transactions are standard from NU6.3. Previously the mempool rejected
   every v6 transaction relayed to it as `nu5-version`.
-- Fixed a sync stall: when Zakura stopped answering a `getdata` at its 1 MB
+- Fixed a sync stall: when Zebra stopped answering a `getdata` at its 1 MB
   limit, the sidecar waited for the download timeout on each remaining block,
   and each wait was longer than the last.
 
