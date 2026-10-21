@@ -101,13 +101,13 @@ mod tests {
 
     use super::{branch_id, network};
 
-    /// The heights zcashd's chainparams.cpp gives Mainnet and Testnet agree with the
-    /// crate's built-in tables for every upgrade that has a public height.
+    /// Public heights through NU6.3 match the crate's tables. Mainnet NU7 uses the
+    /// height supplied by C++, independently of the crate's older built-in schedule.
     #[test]
-    fn public_network_heights_match_crate() {
+    fn public_network_activation_schedules() {
         let main = network(
             "main", 347_500, 419_200, 653_600, 903_000, 1_046_400, 1_687_104, 2_726_400, 3_146_400,
-            3_364_600, 3_428_143, -1,
+            3_364_600, 3_428_143, 3_543_405,
         )
         .unwrap();
         let test = network(
@@ -129,7 +129,6 @@ mod tests {
             NetworkUpgrade::Nu6_1,
             NetworkUpgrade::Nu6_2,
             NetworkUpgrade::Nu6_3,
-            NetworkUpgrade::Nu7,
         ] {
             assert_eq!(
                 main.activation_height(nu),
@@ -139,6 +138,23 @@ mod tests {
                 test.activation_height(nu),
                 TEST_NETWORK.activation_height(nu)
             );
+        }
+        assert_eq!(
+            test.activation_height(NetworkUpgrade::Nu7),
+            TEST_NETWORK.activation_height(NetworkUpgrade::Nu7)
+        );
+        const MAINNET_NU7: u32 = 3_543_405;
+        assert_eq!(
+            main.activation_height(NetworkUpgrade::Nu7),
+            Some(MAINNET_NU7.into())
+        );
+        for (height, expected) in [
+            (MAINNET_NU7 - 1, BranchId::Nu6_3),
+            (MAINNET_NU7, BranchId::Nu7),
+            (MAINNET_NU7 + 1, BranchId::Nu7),
+        ] {
+            assert_eq!(BranchId::for_height(main.as_ref(), height.into()), expected);
+            assert_eq!(branch_id(&main, height), u32::from(expected));
         }
     }
 

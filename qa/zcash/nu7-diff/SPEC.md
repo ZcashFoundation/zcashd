@@ -24,7 +24,7 @@ is committed here as `zakura.jsonl.gz` (see `README.md` for its provenance).
 
 Build each network with the implementation's normal configured-network builder
 (e.g. `testnet::Parameters::build()...to_network()` or the equivalent), starting from that
-implementation's PUBLIC TESTNET defaults (activation heights, funding streams, lockbox, halving params),
+implementation's public defaults for that network (activation heights, funding streams, lockbox, halving params),
 and only changing the NU7 activation height. Do not change anything else. If the builder demands other
 parameters (e.g. NU7 funding streams must be supplied explicitly), use the implementation's own public
 Testnet NU7 defaults if it has them, and record what you had to do in `NOTES.<impl>.md`.
@@ -34,6 +34,7 @@ Testnet NU7 defaults if it has them, and record what you had to do in `NOTES.<im
 | `testnet-A1` | configured Testnet, public defaults       | 4_200_000             |
 | `testnet-A2` | configured Testnet, public defaults       | 4_187_001             |
 | `testnet-real` | the implementation's default public Testnet, unchanged | its scheduled NU7 height, 4_465_026 |
+| `mainnet-real` | the implementation's default public Mainnet, unchanged | its scheduled NU7 height, 3_543_405 |
 | `regtest-R`  | Regtest, the implementation's default Regtest config, with every upgrade through NU6.3 at height 1 (or the implementation's default Regtest heights if it forces them) and NU7 at 300 | 300 |
 
 If an implementation cannot build a scenario, emit one record
@@ -46,7 +47,7 @@ If an implementation cannot build a scenario, emit one record
 For each of these, iterate EVERY height `h` in the scan range and emit a record ONLY at the first height of
 the range and at every height where the value differs from the value at `h-1`
 ("change points"). Scan ranges:
-- `testnet-A1`, `testnet-A2`, `testnet-real`: `h` in `[A - 2_000, A + 12_000_000]`
+- `testnet-A1`, `testnet-A2`, `testnet-real`, `mainnet-real`: `h` in `[A - 2_000, A + 12_000_000]`
 - `regtest-R`: `h` in `[1, 2_000_000]`
 
 Quantities (all "for the block at height h"):
@@ -96,12 +97,12 @@ is too slow (budget: each full scan should finish in < 15 minutes).
   circulation (to NSM) by ZIP 235.
 - `miner_fee_share`, same keys: the fee amount the miner may claim.
 
-### D. Difficulty (ZIP 218 + Testnet min-difficulty), `testnet-A1`, `testnet-real` and `regtest-R`
+### D. Difficulty (ZIP 218 + Testnet min-difficulty), `testnet-A1`, `testnet-real`, `mainnet-real` and `regtest-R`
 
 Build a deterministic synthetic header chain and compute the expected difficulty threshold with the
 implementation's production difficulty code (e.g. `AdjustedDifficulty::new_from_header_time(...)` +
 `expected_difficulty_threshold()` or equivalent):
-- Start from `bits = 0x1f07ffff` for the Testnet scenario and from the network's PoW limit in compact form for
+- Start from `bits = 0x1f07ffff` for public Testnet and Mainnet and from the network's PoW limit in compact form for
   Regtest (note the value), for heights `A-200 .. A+300`. For `regtest-R` use A = 300 but start at height 1
   (i.e. heights `1 .. 600`), with times starting at 1_760_000_000.
 - Block times: `t(A-200) = 1_760_000_000`; for each subsequent height h, interval
@@ -121,7 +122,7 @@ Also emit the raw per-height `median_time_past` if the implementation exposes it
   implementation's version-vs-upgrade check accepts that version at that height (only if there is a pure
   function; otherwise `MISSING`).
 
-### D2. Difficulty away from the PoW limit, `testnet-A1` and `testnet-real`
+### D2. Difficulty away from the PoW limit, `testnet-A1`, `testnet-real` and `mainnet-real`
 
 Section D mostly saturates at the Testnet PoW limit. D2 builds a second chain the same way, but:
 - starting bits `0x1d00ffff`;

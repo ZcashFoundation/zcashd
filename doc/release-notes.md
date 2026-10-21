@@ -10,9 +10,10 @@ NU7 consensus support
 This release adds consensus support for the NU7 network upgrade (the ZIP 259
 set, consensus branch ID `0x77190ad9`). NU7 activated on Testnet at height
 4,465,026 on 2026-10-04, as in Zakura v1.6.0, and v1.1.x sidecars cannot
-follow Testnet past that height. Mainnet has no NU7 height yet; a later
-release will set it to match Zakura. Run this release behind Zakura v1.6.0 or
-later.
+follow Testnet past that height. Mainnet NU7 is scheduled at height 3,543,405,
+matching Zakura's Mainnet schedule. Upgrade before that height to keep following
+Mainnet. Run this release behind a Zakura version that supports NU7 on the
+selected network.
 
 From NU7:
 
@@ -32,9 +33,8 @@ From NU7:
 - **No v4 transactions (ZIP 2003).** v4 transactions, coinbase included, are
   invalid.
 
-The protocol version is now 170180; the release that sets the Mainnet NU7
-height will raise it to 170190. The Rust crates are now Zakura Common 2.2.0,
-the same crates Zakura pins. A CI job checks zcashd's NU7 consensus values
+The protocol version is now 170190, the Mainnet NU7 version. The Rust crates
+are Zakura Common 2.2.0. A CI job checks zcashd's NU7 consensus values
 against Zakura's.
 
 Action required for Sprout users BEFORE NU7 activation
@@ -189,4 +189,3 @@ Valargroup reserves the right to announce a future End of Life through a Zakura
 compatibility release. Integrators are encouraged to migrate to
 [Zakura](https://github.com/zakura-core/zakura) and monitor its
 [CHANGELOG](https://github.com/zakura-core/zakura/blob/main/CHANGELOG.md).
-

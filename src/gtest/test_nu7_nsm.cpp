@@ -130,7 +130,7 @@ TEST(NU7NSM, ReissuanceHeights) {
     }
 
     // No NU7, or a schedule too short to drain the reserve (regtest), means no reissuance.
-    EXPECT_EQ(Params(CBaseChainParams::MAIN).GetConsensus().NSMReissuanceHeight(), std::nullopt);
+    EXPECT_EQ(WithNU7(CBaseChainParams::MAIN, Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT).NSMReissuanceHeight(), std::nullopt);
     EXPECT_EQ(Nu7RegtestParams(1).NSMReissuanceHeight(), std::nullopt);
     EXPECT_EQ(Nu7RegtestParams(300).NSMReissuanceHeight(), std::nullopt);
     EXPECT_FALSE(Nu7RegtestParams(300).IsNSMReissuanceActive(1000000));

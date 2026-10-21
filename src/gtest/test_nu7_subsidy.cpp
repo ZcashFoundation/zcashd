@@ -40,7 +40,9 @@ static CAmount StreamValue(const Consensus::Params& params, Consensus::FundingSt
 
 TEST(NU7Subsidy, PublicNetworkHalvingsMoveWithNU7) {
     // Without NU7, the third halving stays at its pre-NU7 height.
-    EXPECT_EQ(Params(CBaseChainParams::MAIN).GetConsensus().HeightForHalving(3), 4406400);
+    const auto withoutNU7 = CreateChainParamsWithNU7ForTesting(
+        CBaseChainParams::MAIN, Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT);
+    EXPECT_EQ(withoutNU7->GetConsensus().HeightForHalving(3), 4406400);
 
     // With NU7 at A, the third halving is at A + 3 * (H3 - A), and the fourth one
     // PostNU7HalvingInterval (5,040,000) blocks later.
@@ -68,6 +70,49 @@ TEST(NU7Subsidy, PublicNetworkHalvingsMoveWithNU7) {
     const std::vector<int> expected{1116000, 2796000, 5028000, 10068000, 15108000, 20148000};
     for (size_t i = 0; i < expected.size(); i++) {
         EXPECT_EQ(testnet->GetConsensus().HeightForHalving(i + 1), expected[i]) << "halving " << i + 1;
+    }
+}
+
+TEST(NU7Subsidy, MainnetSchedule) {
+    // These are Zakura's built-in Mainnet schedule and its derived consensus values.
+    const auto& params = Params(CBaseChainParams::MAIN).GetConsensus();
+    constexpr int nu7 = 3543405;
+    EXPECT_EQ(params.vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight, nu7);
+    EXPECT_FALSE(params.NetworkUpgradeActive(nu7 - 1, Consensus::UPGRADE_NU7));
+    EXPECT_TRUE(params.NetworkUpgradeActive(nu7, Consensus::UPGRADE_NU7));
+    EXPECT_EQ(CurrentEpochBranchId(nu7 - 1, params), NetworkUpgradeInfo[Consensus::UPGRADE_NU6_3].nBranchId);
+    EXPECT_EQ(CurrentEpochBranchId(nu7, params), 0x77190ad9);
+    EXPECT_EQ(params.PoWTargetSpacing(nu7 - 1), 75);
+    EXPECT_EQ(params.PoWTargetSpacing(nu7), 25);
+    EXPECT_EQ(params.PoWAveragingWindow(nu7 - 1), 17);
+    EXPECT_EQ(params.PoWAveragingWindow(nu7), 102);
+
+    EXPECT_EQ(params.HeightForHalving(3), 6132390);
+    EXPECT_EQ(params.HeightForHalving(4), 11172390);
+    EXPECT_EQ(params.GetBlockSubsidy(nu7 - 1), 156250000);
+    EXPECT_EQ(params.GetBlockSubsidy(nu7), 52083333);
+    EXPECT_EQ(params.GetBlockSubsidy(6132389), 52083333);
+    EXPECT_EQ(params.GetBlockSubsidy(6132390), 26041666);
+    EXPECT_EQ(params.vFundingStreams[Consensus::FS_FPF_ZCG_H3]->GetEndHeight(), 6132390);
+    EXPECT_EQ(params.vFundingStreams[Consensus::FS_CCF_H3]->GetEndHeight(), 6132390);
+    EXPECT_EQ(StreamValue(params, Consensus::FS_FPF_ZCG_H3, nu7), 4166666);
+    EXPECT_EQ(StreamValue(params, Consensus::FS_CCF_H3, nu7), 6249999);
+    EXPECT_EQ(StreamValue(params, Consensus::FS_FPF_ZCG_H3, 6132390), 0);
+    EXPECT_EQ(StreamValue(params, Consensus::FS_CCF_H3, 6132390), 0);
+    EXPECT_EQ(params.NSMReissuanceHeight(), 8939664);
+
+    const auto& stream = *params.vFundingStreams[Consensus::FS_FPF_ZCG_H3];
+    const KeyIO keyIO(Params(CBaseChainParams::MAIN));
+    const CScript oldRecipient = GetScriptForDestination(
+        keyIO.DecodeDestination("t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"));
+    const CScript newRecipient = GetScriptForDestination(
+        keyIO.DecodeDestination("t1MkHnkxVjNpNbCrSs3AJ8J7ZSp6NTYiUcG"));
+    // ZIP 2008 switches recipients at the first address period after activation.
+    for (int height : {nu7 - 1, nu7, 3612389}) {
+        EXPECT_EQ(std::get<CScript>(stream.Recipient(params, height)), oldRecipient) << height;
+    }
+    for (int height : {3612390, 6132389}) {
+        EXPECT_EQ(std::get<CScript>(stream.Recipient(params, height)), newRecipient) << height;
     }
 }
 
@@ -141,7 +186,9 @@ TEST(NU7Subsidy, Revision2StreamsEndAtTheMovedThirdHalving) {
     EXPECT_EQ(mainnet->GetConsensus().vFundingStreams[Consensus::FS_CCF_H3]->GetEndHeight(), 6133200);
 
     // Without NU7 the Revision 2 end heights are unchanged.
-    EXPECT_EQ(Params(CBaseChainParams::MAIN).GetConsensus().vFundingStreams[Consensus::FS_FPF_ZCG_H3]->GetEndHeight(), 4406400);
+    const auto withoutNU7 = CreateChainParamsWithNU7ForTesting(
+        CBaseChainParams::MAIN, Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT);
+    EXPECT_EQ(withoutNU7->GetConsensus().vFundingStreams[Consensus::FS_FPF_ZCG_H3]->GetEndHeight(), 4406400);
     EXPECT_EQ(Consensus::NU7AdjustedFundingStreamHeight(4476000, std::nullopt), 4476000);
     EXPECT_EQ(Consensus::NU7AdjustedFundingStreamHeight(4476000, 4476000), 4476000);
     EXPECT_EQ(Consensus::NU7AdjustedFundingStreamHeight(4476000, 4476003), 4476000);

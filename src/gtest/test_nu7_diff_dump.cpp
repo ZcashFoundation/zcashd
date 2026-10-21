@@ -354,14 +354,15 @@ public:
     {
         static const int64_t PRE[12] = {37, 75, 90, 60, 150, 20, 25, 25, 10, 500, 75, 30};
         static const int64_t POST[12] = {12, 25, 30, 20, 50, 25, 8, 40, 25, 480, 25, 460};
-        const int start = s.isTestnet ? s.nu7 - 200 : 1;
-        const int end = s.isTestnet ? s.nu7 + 300 : 600;
-        const uint32_t startBits = s.isTestnet ? 0x1f07ffff : UintToArith256(p.powLimit).GetCompact();
+        const bool isRegtest = s.chainparams.NetworkIDString() == CBaseChainParams::REGTEST;
+        const int start = isRegtest ? 1 : s.nu7 - 200;
+        const int end = isRegtest ? 600 : s.nu7 + 300;
+        const uint32_t startBits = isRegtest ? UintToArith256(p.powLimit).GetCompact() : 0x1f07ffff;
         Difficulty("", start, end, startBits, [&](int h) { return h < s.nu7 ? PRE[h % 12] : POST[h % 12]; });
 
         // D2: a chain near the target spacing, away from the PoW limit, with a slow and
         // then a fast stretch on each side of NU7 to reach the adjustment bounds.
-        if (s.isTestnet) {
+        if (!isRegtest) {
             static const int64_t PRE2[12] = {60, 90, 75, 70, 80, 75, 65, 85, 75, 72, 78, 75};
             static const int64_t POST2[12] = {20, 30, 25, 23, 27, 25, 22, 28, 25, 24, 26, 25};
             Difficulty("_d2", start, end, 0x1d00ffff, [&](int h) -> int64_t {
@@ -432,6 +433,7 @@ TEST(NU7Diff, DISABLED_Dump) {
         {"testnet-A1", *testnetA1, 4200000, 4198000, 16200000, true, true},
         {"testnet-A2", *testnetA2, 4187001, 4185001, 16187001, true, false},
         {"testnet-real", Params(CBaseChainParams::TESTNET), 4465026, 4463026, 16465026, true, true},
+        {"mainnet-real", Params(CBaseChainParams::MAIN), 3543405, 3541405, 15543405, false, true},
         {"regtest-R", Params(CBaseChainParams::REGTEST), 300, 1, 2000000, false, true},
     };
     const char* only = std::getenv("NU7_DIFF_ONLY");

@@ -3,6 +3,7 @@
 #include "chainparams.h"
 #include "consensus/upgrades.h"
 #include "util/test.h"
+#include "version.h"
 
 #include <optional>
 #include <set>
@@ -48,16 +49,17 @@ TEST(UpgradeTable, Complete) {
     EXPECT_EQ(Consensus::UPGRADE_NU7 + 1, Consensus::UPGRADE_ZFUTURE);
     EXPECT_EQ(NetworkUpgradeInfo[Consensus::UPGRADE_ZFUTURE].nBranchId, 0xffffffff);
 
-    // ZIP 204: NU7 is 170190 on Mainnet and 170180 on Testnet and Regtest. NU7 activates on
-    // Testnet at 4,465,026, as in Zakura; Mainnet and default Regtest stay unscheduled.
+    // ZIP 204: NU7 is 170190 on Mainnet and 170180 on Testnet and Regtest.
+    // The public activation heights match Zakura; default Regtest stays unscheduled.
     constexpr int unscheduled = Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT;
     for (const auto& [network, protocolVersion, activationHeight] : std::vector<std::tuple<std::string, int, int>>{
-             {CBaseChainParams::MAIN, 170190, unscheduled},
+             {CBaseChainParams::MAIN, 170190, 3543405},
              {CBaseChainParams::TESTNET, 170180, 4465026},
              {CBaseChainParams::REGTEST, 170180, unscheduled}}) {
         const auto& nu7 = Params(network).GetConsensus().vUpgrades[Consensus::UPGRADE_NU7];
         EXPECT_EQ(nu7.nProtocolVersion, protocolVersion) << network;
         EXPECT_EQ(nu7.nActivationHeight, activationHeight) << network;
+        EXPECT_GE(PROTOCOL_VERSION, nu7.nProtocolVersion) << network;
     }
 }
 

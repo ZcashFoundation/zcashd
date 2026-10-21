@@ -65,7 +65,10 @@ static void TestBlockSubsidyHalvings(int nSubsidySlowStartInterval, int nPreBlos
 
 BOOST_AUTO_TEST_CASE(block_subsidy_test)
 {
-    TestBlockSubsidyHalvings(Params(CBaseChainParams::MAIN).GetConsensus()); // As in main
+    // Preserve the historical Mainnet halving schedule before NU7 was scheduled.
+    const auto mainnet = CreateChainParamsWithNU7ForTesting(
+        CBaseChainParams::MAIN, Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT);
+    TestBlockSubsidyHalvings(mainnet->GetConsensus());
     TestBlockSubsidyHalvings(20000, Consensus::PRE_BLOSSOM_HALVING_INTERVAL, Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT); // Pre-Blossom
     TestBlockSubsidyHalvings(50, 150, 80); // As in regtest
     TestBlockSubsidyHalvings(500, 1000, 900); // Just another interval
@@ -74,7 +77,10 @@ BOOST_AUTO_TEST_CASE(block_subsidy_test)
 
 BOOST_AUTO_TEST_CASE(subsidy_limit_test)
 {
-    const Consensus::Params& consensusParams = Params(CBaseChainParams::MAIN).GetConsensus();
+    // This total covers the historical schedule with no NU7 spacing change.
+    const auto mainnet = CreateChainParamsWithNU7ForTesting(
+        CBaseChainParams::MAIN, Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT);
+    const Consensus::Params& consensusParams = mainnet->GetConsensus();
 
     CAmount nSum = 0;
     int nHeight = 0;
