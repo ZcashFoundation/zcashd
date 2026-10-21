@@ -402,11 +402,40 @@ BOOST_AUTO_TEST_CASE(rpc_wallet)
         BOOST_CHECK(find_value(obj, "lockboxstreams").empty());
     }
 
-    BOOST_CHECK_NO_THROW(retValue = CallRPC("getblocksubsidy 4406400"));
+    BOOST_CHECK_NO_THROW(retValue = CallRPC("getblocksubsidy 3543404"));
     obj = retValue.get_obj();
-    BOOST_CHECK_EQUAL(find_value(obj, "miner").get_real(), 0.78125);
+    BOOST_CHECK_EQUAL(find_value(obj, "miner").get_real(), 1.25);
+    check_funding_streams(obj, { "Zcash Community Grants to third halving" },
+                               { 0.125 },
+                               { "t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow" });
+    check_lockbox_streams(obj, { "Coinholder-Controlled Fund to third halving" },
+                               { 0.1875 });
+
+    // NU7 reduces the per-block subsidy and moves the third halving. Funding
+    // continues through the old halving height, with the ZIP 2008 recipient
+    // starting at the first address period after activation.
+    for (int height : {3543405, 3543406, 3612389, 3612390, 4406400, 6132389}) {
+        BOOST_TEST_CONTEXT("Mainnet subsidy at height " << height) {
+            BOOST_CHECK_NO_THROW(retValue = CallRPC("getblocksubsidy " + std::to_string(height)));
+            obj = retValue.get_obj();
+            BOOST_CHECK_EQUAL(find_value(obj, "miner").get_real(), 0.41666668);
+            BOOST_CHECK_EQUAL(find_value(obj, "founders").get_real(), 0.0);
+            check_funding_streams(obj, { "Zcash Community Grants to third halving" },
+                                       { 0.04166666 },
+                                       { height < 3612390
+                                           ? "t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"
+                                           : "t1MkHnkxVjNpNbCrSs3AJ8J7ZSp6NTYiUcG" });
+            check_lockbox_streams(obj, { "Coinholder-Controlled Fund to third halving" },
+                                       { 0.06249999 });
+        }
+    }
+
+    BOOST_CHECK_NO_THROW(retValue = CallRPC("getblocksubsidy 6132390"));
+    obj = retValue.get_obj();
+    BOOST_CHECK_EQUAL(find_value(obj, "miner").get_real(), 0.26041666);
     BOOST_CHECK_EQUAL(find_value(obj, "founders").get_real(), 0.0);
     BOOST_CHECK(find_value(obj, "fundingstreams").empty());
+    BOOST_CHECK(find_value(obj, "lockboxstreams").empty());
 
     /*
      * getblock
