@@ -803,6 +803,38 @@ BOOST_AUTO_TEST_CASE(test_IsStandardV2)
     BOOST_CHECK(!IsStandardTx(t, reason, chainparams));
 }
 
+BOOST_AUTO_TEST_CASE(test_IsStandardVersionNU6_3)
+{
+    RegtestActivateNU6point3(false, 200);
+    // Restore the parameters even if a check throws, so later tests are unaffected.
+    struct Deactivate {
+        ~Deactivate() { RegtestDeactivateNU6point3(); }
+    } deactivate;
+
+    CMutableTransaction t;
+    t.fOverwintered = true;
+    t.nVersionGroupId = ZIP248_VERSION_GROUP_ID;
+    t.nVersion = ZIP248_TX_VERSION;
+    t.nConsensusBranchId = NetworkUpgradeInfo[Consensus::UPGRADE_NU6_3].nBranchId;
+    t.vin.resize(1);
+    t.vin[0].scriptSig << std::vector<unsigned char>(65, 0);
+    t.vout.resize(1);
+    t.vout[0].nValue = 90*CENT;
+    t.vout[0].scriptPubKey = GetScriptForDestination(CKey::TestOnlyRandomKey(true).GetPubKey().GetID());
+
+    string reason;
+    // v6 transactions are non-standard before NU6.3 and standard from it.
+    BOOST_CHECK(!IsStandardTx(t, reason, Params(), 199));
+    BOOST_CHECK_EQUAL(reason, "nu5-version");
+    BOOST_CHECK(IsStandardTx(t, reason, Params(), 200));
+
+    // v5 transactions stay standard across NU6.3.
+    t.nVersionGroupId = ZIP225_VERSION_GROUP_ID;
+    t.nVersion = ZIP225_TX_VERSION;
+    BOOST_CHECK(IsStandardTx(t, reason, Params(), 199));
+    BOOST_CHECK(IsStandardTx(t, reason, Params(), 200));
+}
+
 BOOST_AUTO_TEST_CASE(TxV5)
 {
     // [

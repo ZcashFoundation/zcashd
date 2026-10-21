@@ -232,6 +232,22 @@ void ThrowInputSelectionError(
         },
         [](const IronwoodUnsupportedError&) {
             throw JSONRPCError(RPC_INVALID_PARAMETER, IRONWOOD_WALLET_UNSUPPORTED);
+        },
+        [](const SproutUnsupportedError&) {
+            throw JSONRPCError(
+                RPC_INVALID_PARAMETER,
+                "Sprout funds can no longer be spent: from NU7, ZIP 2003 makes v4 "
+                "transactions, the only ones that carry Sprout JoinSplits, invalid.");
+        },
+        [](const ExcessShieldedActionsError& err) {
+            throw JSONRPCError(
+                RPC_INVALID_PARAMETER,
+                strprintf(
+                    "This transaction would have %u Sapling spends and outputs, but from NU7 "
+                    "a block can hold at most %u (ZIP 218), so it could never be mined. Send "
+                    "to fewer Sapling recipients, or first merge notes into fewer, larger ones.",
+                    err.saplingIOs,
+                    err.limit));
         }
     });
 }

@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 
-use rand_core::OsRng;
+use rand_10::rngs::SysRng;
+use rand_core_10::UnwrapErr;
 use tracing::{debug, error};
 
 use crate::{
@@ -149,7 +150,7 @@ impl BatchValidator {
 
             // The verifying key for this batch's circuit was fixed at construction
             // (`orchard_batch_validation_init`).
-            if inner.validator.validate(OsRng) {
+            if inner.validator.validate(UnwrapErr(SysRng)) {
                 // `BatchValidator::validate()` is only called if every
                 // `BatchValidator::check_bundle()` returned `true`, so at this point
                 // every bundle that was added to `inner.queued_entries` has valid

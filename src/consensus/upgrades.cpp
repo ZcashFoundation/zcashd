@@ -4,11 +4,13 @@
 
 #include "consensus/upgrades.h"
 
+#include <iterator>
+
 /**
  * General information about each network upgrade.
  * Ordered by Consensus::UpgradeIndex.
  */
-const struct NUInfo NetworkUpgradeInfo[Consensus::MAX_NETWORK_UPGRADES] = {
+const struct NUInfo NetworkUpgradeInfo[] = {
     {
         .nBranchId = 0,
         .strName = "Sprout",
@@ -70,11 +72,19 @@ const struct NUInfo NetworkUpgradeInfo[Consensus::MAX_NETWORK_UPGRADES] = {
         .strInfo = "See https://z.cash/upgrade/nu6.3/ for details.",
     },
     {
+        .nBranchId = 0x77190ad9,
+        .strName = "NU7",
+        .strInfo = "See https://z.cash/upgrade/nu7/ for details.",
+    },
+    {
         .nBranchId = 0xffffffff,
         .strName = "ZFUTURE",
         .strInfo = "Future network upgrade (integration testing only)",
     }
 };
+static_assert(
+    std::size(NetworkUpgradeInfo) == Consensus::MAX_NETWORK_UPGRADES,
+    "NetworkUpgradeInfo must have exactly one entry per Consensus::UpgradeIndex");
 
 const uint32_t SPROUT_BRANCH_ID = NetworkUpgradeInfo[Consensus::BASE_SPROUT].nBranchId;
 

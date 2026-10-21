@@ -671,11 +671,24 @@ TransactionBuilderResult TransactionBuilder::Build()
         }
     }
 
-    return TransactionBuilderResult(CTransaction(mtx));
+    // ZIP 218: from NU7 a transaction over a per-block shielded limit could never be mined.
+    const CTransaction tx(mtx);
+    if (consensusParams.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+        if (auto exceeded = ShieldedActionCounts(tx).ExceededLimit()) {
+            return TransactionBuilderResult(strprintf(
+                "The transaction exceeds a ZIP 218 per-block shielded limit (%s), so it could never be mined",
+                exceeded.value()));
+        }
+    }
+    return TransactionBuilderResult(tx);
 }
 
 void TransactionBuilder::CheckOrSetUsingSprout()
 {
+    if (consensusParams.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+        throw JSONRPCError(RPC_WALLET_ERROR,
+            "Can't use Sprout from NU7: ZIP 2003 makes v4 transactions, the only ones that carry Sprout JoinSplits, invalid.");
+    }
     if (orchardBuilder.has_value()) {
         throw JSONRPCError(RPC_WALLET_ERROR, "Can't use Sprout with a v5 transaction.");
     } else {

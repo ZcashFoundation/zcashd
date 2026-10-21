@@ -415,3 +415,43 @@ std::string CTransaction::ToString() const
         str += "    " + vout[i].ToString() + "\n";
     return str;
 }
+
+ShieldedActionCounts::ShieldedActionCounts(const CTransaction& tx) :
+    orchardActions(tx.GetOrchardBundle().GetNumActions()),
+    ironwoodActions(tx.GetIronwoodBundle().GetNumActions()),
+    saplingIOs(tx.GetSaplingSpendsCount() + tx.GetSaplingOutputsCount()),
+    sproutJoinSplits(tx.vJoinSplit.size()) {}
+
+ShieldedActionCounts& ShieldedActionCounts::operator+=(const ShieldedActionCounts& other)
+{
+    orchardActions += other.orchardActions;
+    ironwoodActions += other.ironwoodActions;
+    saplingIOs += other.saplingIOs;
+    sproutJoinSplits += other.sproutJoinSplits;
+    return *this;
+}
+
+uint64_t ShieldedActionCounts::Cost() const
+{
+    return orchardActions + ironwoodActions + saplingIOs + 2 * sproutJoinSplits;
+}
+
+std::optional<std::string> ShieldedActionCounts::ExceededLimit() const
+{
+    if (orchardActions > ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT) {
+        return "bad-blk-orchard-actions";
+    }
+    if (ironwoodActions > ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT) {
+        return "bad-blk-ironwood-actions";
+    }
+    if (saplingIOs > SAPLING_BLOCK_IO_LIMIT) {
+        return "bad-blk-sapling-ios";
+    }
+    if (sproutJoinSplits > SPROUT_BLOCK_JOINSPLIT_LIMIT) {
+        return "bad-blk-joinsplits";
+    }
+    if (Cost() > GLOBAL_SHIELDED_BUDGET) {
+        return "bad-blk-shielded-cost";
+    }
+    return std::nullopt;
+}

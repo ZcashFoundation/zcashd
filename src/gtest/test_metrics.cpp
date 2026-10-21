@@ -123,6 +123,36 @@ TEST(Metrics, EstimateNetHeight) {
     SystemClock::SetGlobal();
 }
 
+TEST(Metrics, EstimateNetHeightAcrossNU7) {
+    FixedClock::SetGlobal();
+    auto params = RegtestActivateBlossom(false, 200).GetConsensus();
+    params.vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight = 300;
+    int64_t blockTimes[500];
+    for (int i = 0; i < 500; i++) {
+        blockTimes[i] = i ? blockTimes[i - 1] + params.PoWTargetSpacing(i) : 0;
+    }
+    FixedClock::Instance()->Set(std::chrono::seconds(blockTimes[499]));
+    for (int i = 0; i < 500; i++) {
+        // Check that we are within 1 of the correct height, from each spacing era
+        EXPECT_LT(std::abs(499 - EstimateNetHeight(params, i, blockTimes[i])), 2) << i;
+    }
+    RegtestDeactivateBlossom();
+    SystemClock::SetGlobal();
+}
+
+TEST(Metrics, EstimateNetHeightAtActivation) {
+    FixedClock::SetGlobal();
+    auto params = RegtestActivateBlossom(false, 200).GetConsensus();
+    params.vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight = 305;
+    // The activation block is due exactly now, so it counts: 305 rounds to 310, where 304
+    // would round to 300.
+    const int64_t headerTime = 1000000;
+    FixedClock::Instance()->Set(std::chrono::seconds(headerTime + params.PoWTargetSpacing(305)));
+    EXPECT_EQ(EstimateNetHeight(params, 304, headerTime), 310);
+    RegtestDeactivateBlossom();
+    SystemClock::SetGlobal();
+}
+
 TEST(Metrics, NextUpgrade) {
     SelectParams(CBaseChainParams::REGTEST);
     const Consensus::Params& params = Params().GetConsensus();

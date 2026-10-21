@@ -32,11 +32,9 @@ use crate::{
     zcashd_orchard::OrderedAddress,
 };
 
-/// The number of checkpoints of the Orchard note commitment tree that the wallet
-/// retains, and therefore the maximum number of blocks that `Wallet::rewind` can
-/// roll back. This must be at least `MAX_REORG_LENGTH + 1` (see `src/main.h`),
-/// because `CWallet::DecrementNoteWitnesses` wraps the rewind FFI call in an
-/// `assert()`.
+/// The most block checkpoints the note commitment tree keeps, which bounds how far the
+/// wallet can rewind. It exceeds `MAX_REORG_LENGTH` in `src/main.h`, so the wallet can follow
+/// every reorg the node accepts.
 pub const MAX_CHECKPOINTS: usize = 1001;
 
 /// A data structure tracking the last transaction whose notes
@@ -1340,6 +1338,7 @@ pub extern "C" fn orchard_wallet_load_note_commitment_tree(
         let last_checkpoint = Optional::read(&mut reader, |r| {
             r.read_u32::<LittleEndian>().map(BlockHeight::from)
         })?;
+        // A tree written while MAX_CHECKPOINTS was smaller gets the current limit.
         let commitment_tree = read_tree(&mut reader, MAX_CHECKPOINTS)?;
 
         // Read note positions.
@@ -1431,4 +1430,45 @@ pub extern "C" fn orchard_wallet_unspent_notes_are_spendable(wallet: *const Wall
         .get_filtered_notes(None, true, true)
         .iter()
         .all(|(outpoint, _)| wallet.get_spend_info(*outpoint, 0).is_ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use incrementalmerkletree::Hashable;
+
+    use super::*;
+
+    type Tree = BridgeTree<MerkleHashOrchard, u32, { sapling::NOTE_COMMITMENT_TREE_DEPTH }>;
+
+    /// Appends a leaf to `tree` and checkpoints it as `id`.
+    fn add_checkpoint(tree: &mut Tree, id: u32) {
+        assert!(tree.append(MerkleHashOrchard::empty_leaf()));
+        assert!(tree.checkpoint(id));
+    }
+
+    #[test]
+    fn older_trees_get_the_current_checkpoint_limit() {
+        let mut tree = Tree::new(100);
+        for id in 0..150 {
+            add_checkpoint(&mut tree, id);
+        }
+        assert_eq!(tree.checkpoints().len(), 100);
+        let root = tree.root(0);
+        let mut written = vec![];
+        write_tree(&mut written, &tree).unwrap();
+
+        let mut tree: Tree = read_tree(&written[..], MAX_CHECKPOINTS).unwrap();
+        assert_eq!(tree.max_checkpoints(), MAX_CHECKPOINTS);
+        assert_eq!(tree.checkpoints().len(), 100);
+        assert_eq!(tree.root(0), root);
+
+        // It can now rewind past the old limit, as far as the node reorgs.
+        for id in 150..(150 + MAX_CHECKPOINTS as u32) {
+            add_checkpoint(&mut tree, id);
+        }
+        assert_eq!(tree.checkpoints().len(), MAX_CHECKPOINTS);
+        for _ in 0..MAX_CHECKPOINTS {
+            assert!(tree.rewind());
+        }
+    }
 }

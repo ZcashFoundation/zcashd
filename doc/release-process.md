@@ -240,9 +240,14 @@ the compatibility artifacts to the same GitHub release tag:
   automatic release trigger).
 - Ensure the workflow publishes:
   - stripped runtime archives (`zcashd-zebra-compat-<tag>-<platform>.tar.gz`);
+  - standalone stripped `zcashd` executables
+    (`zcashd-zebra-compat-<tag>-<platform>`), byte-identical to `./bin/zcashd`
+    in the runtime archive, with their `.sha256` files. Zakura downloads these
+    and pins their SHA-256, so a published executable must never be replaced;
   - debug symbol archives (`...-debug.tar.gz`);
   - `SHA256SUMS.txt`;
-  - `zcashd-zebra-compat-manifest-<tag>.json`.
+  - `zcashd-zebra-compat-manifest-<tag>.json`, whose `runtime_binary` entry
+    gives each executable's file name, URL, SHA-256 and size.
 - Verify the manifest and checksums before announcing the release.
 
 Version changes for these assets should continue to flow through

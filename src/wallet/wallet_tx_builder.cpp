@@ -433,6 +433,10 @@ WalletTxBuilder::PrepareTransaction(
     }
 
     auto consensus = params.GetConsensus();
+    const bool nu7Active = consensus.NetworkUpgradeActive(chain.Height() + 1, Consensus::UPGRADE_NU7);
+    if (nu7Active && selector.SelectsSprout()) {
+        return tl::make_unexpected(SproutUnsupportedError());
+    }
     int anchorHeight = GetAnchorHeight(chain, anchorConfirmations);
     bool afterNU5 = consensus.NetworkUpgradeActive(anchorHeight, Consensus::UPGRADE_NU5);
     bool allowOrchard =
@@ -520,6 +524,26 @@ WalletTxBuilder::PrepareTransaction(
             || orchardChange)
         {
             return tl::make_unexpected(IronwoodUnsupportedError());
+        }
+    }
+
+    // ZIP 218: from NU7 a block holds at most SAPLING_BLOCK_IO_LIMIT Sapling spends and
+    // outputs, so a transaction with more could never be mined. Change is among the
+    // resolved payments, and the builder pads a bundle to two outputs.
+    if (nu7Active) {
+        uint64_t saplingSpends = resolvedSelection.GetInputs().saplingNoteEntries.size();
+        uint64_t saplingOutputs = 0;
+        for (const auto& payment : resolvedSelection.GetPayments().GetResolvedPayments()) {
+            if (std::holds_alternative<SaplingPaymentAddress>(payment.address)) {
+                saplingOutputs++;
+            }
+        }
+        if (saplingSpends > 0 || saplingOutputs > 0) {
+            saplingOutputs = std::max<uint64_t>(saplingOutputs, 2);
+        }
+        if (saplingSpends + saplingOutputs > SAPLING_BLOCK_IO_LIMIT) {
+            return tl::make_unexpected(
+                ExcessShieldedActionsError(saplingSpends + saplingOutputs, SAPLING_BLOCK_IO_LIMIT));
         }
     }
 

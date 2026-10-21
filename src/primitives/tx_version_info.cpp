@@ -6,7 +6,8 @@
 
 /**
  * Returns the most recent supported transaction version and version group id,
- * as of the specified activation height and active features.
+ * as of the specified activation height and active features. From NU7 requireV4
+ * is ignored, because ZIP 2003 makes v4 transactions invalid.
  */
 TxVersionInfo CurrentTxVersionInfo(
     const Consensus::Params& consensus,
@@ -19,7 +20,8 @@ TxVersionInfo CurrentTxVersionInfo(
             .nVersionGroupId = ZFUTURE_VERSION_GROUP_ID,
             .nVersion =        ZFUTURE_TX_VERSION
         };
-    } else if (consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU5) && !requireV4) {
+    } else if (consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU5) &&
+               (!requireV4 || consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7))) {
         return {
             .fOverwintered =   true,
             .nVersionGroupId = ZIP225_VERSION_GROUP_ID,

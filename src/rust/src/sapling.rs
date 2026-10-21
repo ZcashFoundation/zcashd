@@ -10,7 +10,8 @@ use bellman::groth16::Proof;
 use bls12_381::Bls12;
 use group::GroupEncoding;
 use memuse::DynamicUsage;
-use rand_core::{OsRng, RngCore};
+use rand_10::rngs::SysRng;
+use rand_core_10::{Rng, UnwrapErr};
 use sapling::keys::EphemeralSecretKey;
 use sapling::{
     builder::BundleType,
@@ -347,7 +348,7 @@ impl SpendProver for StaticTxProver {
         )
     }
 
-    fn create_proof<R: RngCore>(&self, circuit: circuit::Spend, rng: &mut R) -> Self::Proof {
+    fn create_proof<R: Rng>(&self, circuit: circuit::Spend, rng: &mut R) -> Self::Proof {
         SAPLING_SPEND_PARAMS
             .get()
             .expect("Parameters not loaded: SAPLING_SPEND_PARAMS should have been initialized")
@@ -372,7 +373,7 @@ impl OutputProver for StaticTxProver {
         OutputParameters::prepare_circuit(esk, payment_address, rcm, value, rcv)
     }
 
-    fn create_proof<R: RngCore>(&self, circuit: circuit::Output, rng: &mut R) -> Self::Proof {
+    fn create_proof<R: Rng>(&self, circuit: circuit::Output, rng: &mut R) -> Self::Proof {
         SAPLING_OUTPUT_PARAMS
             .get()
             .expect("Parameters not loaded: SAPLING_OUTPUT_PARAMS should have been initialized")
@@ -476,7 +477,7 @@ impl SaplingBuilder {
     fn build(self) -> Result<SaplingUnauthorizedBundle, String> {
         let Self { builder, extsks } = self;
         let prover = crate::sapling::StaticTxProver;
-        let rng = OsRng;
+        let rng = UnwrapErr(SysRng);
         let bundle = builder
             .build::<StaticTxProver, StaticTxProver, _, ZatBalance>(&extsks, rng)
             .map_err(|e| format!("Failed to build Sapling bundle: {}", e))?
@@ -514,7 +515,7 @@ impl SaplingUnauthorizedBundle {
 
         let authorized = if let Some(bundle) = bundle {
             let authorized = bundle
-                .apply_signatures(OsRng, sighash_bytes, &signing_keys)
+                .apply_signatures(UnwrapErr(SysRng), sighash_bytes, &signing_keys)
                 .map_err(|e| format!("Failed to apply signatures to Sapling bundle: {}", e))?;
             Some(authorized)
         } else {
@@ -737,7 +738,7 @@ impl BatchValidator {
                 SAPLING_OUTPUT_VK.get().expect(
                     "Parameters not loaded: SAPLING_OUTPUT_VK should have been initialized",
                 ),
-                OsRng,
+                UnwrapErr(SysRng),
             ) {
                 // `Self::validate()` is only called if every `Self::check_bundle()`
                 // returned `true`, so at this point every bundle that was added to

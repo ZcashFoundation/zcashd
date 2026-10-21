@@ -161,6 +161,14 @@ const Consensus::Params& RegtestActivateNU6point3();
 
 void RegtestDeactivateNU6point3();
 
+/** Activates every upgrade through NU6.3 on regtest, and NU7 at the given height. */
+const Consensus::Params& RegtestActivateNU7(bool updatePow, int nu7ActivationHeight = Consensus::NetworkUpgrade::ALWAYS_ACTIVE);
+/** Activates every upgrade through NU7 on regtest from genesis. */
+const Consensus::Params& RegtestActivateNU7();
+
+/** Undoes RegtestActivateNU7 and selects Mainnet again. */
+void RegtestDeactivateNU7();
+
 libzcash::SaplingExtendedSpendingKey GetTestMasterSaplingSpendingKey();
 
 CKey AddTestCKeyToKeyStore(CBasicKeyStore& keyStore);

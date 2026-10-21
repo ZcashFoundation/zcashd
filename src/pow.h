@@ -17,6 +17,12 @@ class CChainParams;
 class uint256;
 class arith_uint256;
 
+/**
+ * Whether the special testnet difficulty rule lets pblock, the block after pindexLast, be
+ * mined at the PoW limit: its timestamp is more than MinDifficultyGap (6 target spacings, or
+ * 18 from NU7) after its parent's.
+ */
+bool IsMinDifficultyBlock(const CBlockIndex* pindexLast, const CBlockHeader* pblock, const Consensus::Params&);
 unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHeader *pblock, const Consensus::Params&);
 unsigned int CalculateNextWorkRequired(arith_uint256 bnAvg,
                                        int64_t nLastBlockTime, int64_t nFirstBlockTime,

@@ -13,6 +13,12 @@ on:
 permissions:
   contents: write
 
+# Runs for the same tag queue instead of overlapping, so a later run's asset check sees what the
+# first run published.
+concurrency:
+  group: release-zcashd-compat-${{ github.event.release.tag_name || inputs.release_tag }}
+  cancel-in-progress: false
+
 jobs:
   build-assets:
     name: Build zcashd compat (${{ matrix.name }})
@@ -25,7 +31,11 @@ jobs:
             host: x86_64-pc-linux-gnu
             cross_deps: ""
     steps:
+      # Build the tagged source, also for a manual run from another branch. The qualified ref
+      # keeps a branch with the same name from being built instead.
       - uses: actions/checkout@v6.0.3
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.release_tag }}
 
       - name: Resolve release tag
         id: release-tag
@@ -41,9 +51,74 @@ jobs:
             exit 1
           fi
           echo "value=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           # This repository tags sidecar releases as zebra-compat-vX.Y.Z, but the
           # packaging script and artifact names use the bare vX.Y.Z version.
           echo "version=${TAG#zebra-compat-}" >> "$GITHUB_OUTPUT"
+
+      # Also push the unprefixed tag that the previous release publisher pushed.
+      - name: Resolve Docker tags
+        id: docker-tags
+        shell: bash
+        env:
+          TAG: ${{ steps.release-tag.outputs.value }}
+        run: |
+          tags=("zakuracore/zcashd:${TAG}")
+          if [[ "$TAG" == v* ]]; then
+            tags+=("zakuracore/zcashd:${TAG#v}")
+          fi
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # Zakura pins the checksums of published assets, and a rebuilt image would differ from the
+      # pushed one (the base image floats), so a rebuild must never replace either.
+      - name: Refuse to rebuild a tag with published assets or images
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release-tag.outputs.value }}
+          IMAGES: ${{ steps.docker-tags.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # Only a missing release or image may continue; any other lookup failure fails closed.
+          status=$(curl -sS -o release.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/releases/tags/$TAG")
+          case "$status" in
+            200)
+              if jq -r '.assets[].name' release.json | grep -q '^zcashd-zebra-compat-'; then
+                echo "::error::Release $TAG already has assets, which Zakura may pin. Publish a new tag instead."
+                exit 1
+              fi
+              ;;
+            404)
+              echo "Release $TAG does not exist yet."
+              ;;
+            *)
+              echo "::error::Looking up release $TAG failed with HTTP $status."
+              exit 1
+              ;;
+          esac
+
+          while read -r image; do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              "https://hub.docker.com/v2/namespaces/zakuracore/repositories/zcashd/tags/${image#*:}")
+            case "$status" in
+              200)
+                echo "::error::Image $image already exists. To finish this run, use \"Re-run failed jobs\"; otherwise publish a new tag."
+                exit 1
+                ;;
+              404)
+                ;;
+              *)
+                echo "::error::Looking up image $image failed with HTTP $status."
+                exit 1
+                ;;
+            esac
+          done <<< "$IMAGES"
 
       - name: Install cross-compilation dependencies
         if: matrix.cross_deps != ''
@@ -62,6 +137,15 @@ jobs:
             --host "${{ matrix.host }}" \
             --version "${{ steps.release-tag.outputs.version }}" \
             --output-dir "./artifacts/${{ matrix.name }}"
+
+      # Upload before the Docker steps, so that a Docker failure cannot lose the assets.
+      - name: Upload matrix artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: zcashd-compat-${{ matrix.name }}
+          path: ./artifacts/${{ matrix.name }}
+          # Lets "Re-run failed jobs" retry a failed Docker step after this upload.
+          overwrite: true
 
       - name: Prepare Docker build context
         if: matrix.name == 'linux-x86_64'
@@ -117,17 +201,11 @@ jobs:
           file: ./contrib/docker/source-runtime.Dockerfile
           platforms: linux/amd64
           push: true
-          tags: zakuracore/zcashd:${{ steps.release-tag.outputs.value }}
+          tags: ${{ steps.docker-tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.release-tag.outputs.sha }}
             org.opencontainers.image.version=${{ steps.release-tag.outputs.value }}
-
-      - name: Upload matrix artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: zcashd-compat-${{ matrix.name }}
-          path: ./artifacts/${{ matrix.name }}
 
   publish-assets:
     name: Publish zcashd compat assets
@@ -159,54 +237,16 @@ jobs:
       - name: Build consolidated manifest and checksums
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p ./publish/final
-          RELEASE_TAG="${{ steps.release-tag.outputs.value }}"
-          REPO="${{ github.repository }}"
-          BASE_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"
+          ./zcutil/consolidate-zcashd-compat-release.sh \
+            --input-dir ./publish \
+            --output-dir ./publish/final \
+            --release-tag "${{ steps.release-tag.outputs.value }}" \
+            --repository "${{ github.repository }}"
 
-          RELEASE_TAG="$RELEASE_TAG" BASE_URL="$BASE_URL" REPOSITORY="$REPO" python3 - <<'PY'
-          import glob
-          import json
-          import os
-          from pathlib import Path
-
-          release_tag = os.environ["RELEASE_TAG"]
-          base_url = os.environ["BASE_URL"]
-          repository = os.environ["REPOSITORY"]
-          files = sorted(glob.glob("./publish/**/*.metadata.json", recursive=True))
-          if not files:
-            raise SystemExit("No metadata files found.")
-
-          entries = []
-          for path in files:
-            item = json.loads(Path(path).read_text(encoding="utf-8"))
-            item["runtime"]["url"] = f"{base_url}/{item['runtime']['archive']}"
-            item["debug"]["url"] = f"{base_url}/{item['debug']['archive']}"
-            entries.append(item)
-
-          output = {
-            "schema_version": 1,
-            "release_tag": release_tag,
-            "repository": repository,
-            "artifacts": entries,
-          }
-
-          Path("./publish/final").mkdir(parents=True, exist_ok=True)
-          Path(f"./publish/final/zcashd-zebra-compat-manifest-{release_tag}.json").write_text(
-            json.dumps(output, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-          )
-          PY
-
-          find ./publish -type f -name '*.tar.gz' -exec cp {} ./publish/final/ \;
-          (cd ./publish/final && sha256sum ./* > SHA256SUMS.txt)
-
+      # A release candidate is a prerelease, so it never becomes the latest release.
       - name: Upload assets to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release-tag.outputs.value }}
-          files: |
-            ./publish/final/*.tar.gz
-            ./publish/final/zcashd-zebra-compat-manifest-*.json
-            ./publish/final/SHA256SUMS.txt
+          prerelease: ${{ contains(steps.release-tag.outputs.value, '-rc') }}
+          files: ./publish/final/*

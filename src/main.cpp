@@ -305,8 +305,13 @@ namespace {
     /** Dirty block file entries. */
     set<int> setDirtyFileInfo;
 
+    /** A relayed transaction, and the branch ID it was in the mempool for. */
+    struct RelayedTx {
+        std::shared_ptr<const CTransaction> tx;
+        uint32_t branchId;
+    };
     /** Relay map, protected by cs_main. */
-    typedef std::map<uint256, std::shared_ptr<const CTransaction>> MapRelay;
+    typedef std::map<uint256, RelayedTx> MapRelay;
     MapRelay mapRelay;
     /** Expiration-time ordered list of (expire time, relay map entry) pairs, protected by cs_main). */
     std::deque<std::pair<int64_t, MapRelay::iterator>> vRelayExpiration;
@@ -497,7 +502,11 @@ void UpdatePreferredDownload(CNode* node, CNodeState* state)
 // Returns time at which to timeout block request (nTime in microseconds)
 int64_t GetBlockTimeout(int64_t nTime, int nValidatedQueuedBefore, const Consensus::Params &consensusParams, int nHeight)
 {
-    return nTime + 500000 * consensusParams.PoWTargetSpacing(nHeight) * (4 + nValidatedQueuedBefore);
+    // Keep the post-Blossom timeout after NU7's shorter spacing: disconnecting the only
+    // peer (Zakura, for a sidecar) over a slow block would stall this node.
+    const int64_t spacing = std::max<int64_t>(
+        consensusParams.PoWTargetSpacing(nHeight), Consensus::POST_BLOSSOM_POW_TARGET_SPACING);
+    return nTime + 500000 * spacing * (4 + nValidatedQueuedBefore);
 }
 
 void InitializeNode(NodeId nodeid, const CNode *pnode) {
@@ -518,8 +527,10 @@ void FinalizeNode(NodeId nodeid) {
         AddressCurrentlyConnected(state->address);
     }
 
-    for (const QueuedBlock& entry : state->vBlocksInFlight)
+    for (const QueuedBlock& entry : state->vBlocksInFlight) {
+        nQueuedValidatedHeaders -= entry.fValidatedHeaders;
         mapBlocksInFlight.erase(entry.hash);
+    }
     EraseOrphansFor(nodeid);
     nPreferredDownload -= state->fPreferredDownload;
 
@@ -992,6 +1003,7 @@ bool ContextualCheckTransaction(
     bool nu6point1Active = consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU6_1);
     bool nu6point2Active = consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU6_2);
     bool nu6point3Active = consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU6_3);
+    bool nu7Active = consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7);
     bool futureActive = consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_ZFUTURE);
 
     assert(!saplingActive || overwinterActive); // Sapling cannot be active unless Overwinter is
@@ -1002,7 +1014,8 @@ bool ContextualCheckTransaction(
     assert(!nu6point1Active || nu6Active);      // NU6.1 cannot be active unless NU6 is
     assert(!nu6point2Active || nu6point1Active); // NU6.2 cannot be active unless NU6.1 is
     assert(!nu6point3Active || nu6point2Active); // NU6.3 cannot be active unless NU6.2 is
-    assert(!futureActive || nu6point3Active);   // ZFUTURE must include consensus rules for all supported network upgrades.
+    assert(!nu7Active || nu6point3Active);      // NU7 cannot be active unless NU6.3 is
+    assert(!futureActive || nu7Active);         // ZFUTURE must include consensus rules for all supported network upgrades.
 
     auto& orchard_bundle = tx.GetOrchardBundle();
 
@@ -1226,6 +1239,15 @@ bool ContextualCheckTransaction(
         // Rules that apply generally before Canopy. These were
         // previously noncontextual checks that became contextual
         // after Canopy activation.
+    }
+
+    // ZIP 2003: from NU7, v4 transactions are invalid, coinbase transactions included.
+    // Only v2 to v4 transactions can carry Sprout JoinSplits, so this also ends them.
+    if (nu7Active && tx.fOverwintered && tx.nVersionGroupId == SAPLING_VERSION_GROUP_ID) {
+        return state.DoS(
+            dosLevelConstricting,
+            error("ContextualCheckTransaction(): v4 transactions are invalid from NU7"),
+            REJECT_INVALID, "bad-tx-v4-after-nu7");
     }
 
     // Rules that apply to NU5 or later:
@@ -1521,9 +1543,6 @@ bool ContextualCheckTransaction(
                         error("ContextualCheckTransaction(): Future version too high"),
                         REJECT_INVALID, "bad-tx-zfuture-version-too-high");
                 }
-                break;
-            case SAPLING_VERSION_GROUP_ID:
-                // Allow V4 transactions while futureActive
                 break;
             case ZIP225_VERSION_GROUP_ID:
                 // Allow V5 transactions while futureActive
@@ -2116,6 +2135,38 @@ std::string FormatStateMessage(const CValidationState &state)
     return orchard_circuit_version;
 }
 
+/**
+ * The height AcceptToMemoryPool also checks a transaction at: RELAY_HEIGHT_MARGIN blocks
+ * past the next block, or past the block after the best header if that is higher.
+ */
+static int RelayHeight(int nextBlockHeight)
+{
+    AssertLockHeld(cs_main);
+    // A best header on a chain this node found invalid is not Zakura's.
+    const bool bestHeaderValid = pindexBestHeader != nullptr &&
+        !(pindexBestHeader->nStatus & BLOCK_FAILED_MASK) &&
+        !(pindexBestInvalid != nullptr &&
+          pindexBestHeader->GetAncestor(pindexBestInvalid->nHeight) == pindexBestInvalid);
+    return std::max(nextBlockHeight, bestHeaderValid ? pindexBestHeader->nHeight + 1 : 0) +
+        RELAY_HEIGHT_MARGIN;
+}
+
+/**
+ * Removes the mempool transactions that commit to a branch ID other than the next block's
+ * or the one at RelayHeight, which AcceptToMemoryPool would now refuse. Once RelayHeight
+ * reaches an upgrade, that is every transaction until the upgrade activates.
+ */
+static void RemoveMempoolTxsForOtherBranches(const Consensus::Params& consensus)
+{
+    AssertLockHeld(cs_main);
+    const int nextBlockHeight = chainActive.Tip()->nHeight + 1;
+    const uint32_t nextBranchId = CurrentEpochBranchId(nextBlockHeight, consensus);
+    const uint32_t relayBranchId = CurrentEpochBranchId(RelayHeight(nextBlockHeight), consensus);
+    mempool.removeWithoutBranchId(nextBranchId);
+    if (relayBranchId != nextBranchId) {
+        mempool.removeWithoutBranchId(relayBranchId);
+    }
+}
 
 bool AcceptToMemoryPool(
         const CChainParams& chainparams,
@@ -2162,6 +2213,26 @@ bool AcceptToMemoryPool(
     string reason;
     if (chainparams.RequireStandard() && !IsStandardTx(tx, reason, chainparams, nextBlockHeight))
         return state.DoS(0, false, REJECT_NONSTANDARD, reason);
+
+    // Zakura may be a few blocks ahead, and bans a peer that relays a transaction it
+    // rejects, so the transaction must also be valid at the highest height Zakura could
+    // check it for. From NU7 it must also fit in a block, which Zakura checks for each
+    // transaction.
+    {
+        const int relayHeight = RelayHeight(nextBlockHeight);
+        CValidationState relayState;
+        if (!ContextualCheckTransaction(tx, relayState, chainparams, relayHeight, false)) {
+            return state.DoS(0, false, REJECT_NONSTANDARD, "tx-invalid-at-relay-height",
+                BodyCorruption::Default,
+                strprintf("invalid at height %d: %s", relayHeight, relayState.GetRejectReason()));
+        }
+        if (chainparams.GetConsensus().NetworkUpgradeActive(relayHeight, Consensus::UPGRADE_NU7)) {
+            if (auto exceeded = ShieldedActionCounts(tx).ExceededLimit()) {
+                return state.DoS(0, false, REJECT_NONSTANDARD, "tx-exceeds-block-shielded-limit",
+                    BodyCorruption::Default, exceeded.value());
+            }
+        }
+    }
 
     // Only accept nLockTime-using transactions that can be mined in the next
     // block; we don't want our mempool filled up with transactions that can't
@@ -3559,6 +3630,67 @@ static bool CheckBlockBodyAuthCommitment(
     std::optional<uint256>& hashAuthDataRoot,
     std::optional<uint256>& hashChainHistoryRoot);
 
+/**
+ * Computes the ZIP 237 NSM value balance after the block at nHeight from the balance
+ * after its parent, the block's chain supply delta, and (for the initial balance) the
+ * chain total supply after the block.
+ *
+ * NSMValueBalance(h) is 0 below NU7ActivationHeight - 1, INITIAL_NSM_VALUE_BALANCE at
+ * NU7ActivationHeight - 1, and from NU7 changes by ScheduledBlockSubsidy(h) minus the
+ * chain supply delta. Because the coinbase must claim exactly its input value, that
+ * change is the value the block removed from circulation (ZIP 235) minus its
+ * AdditionalBlockSubsidy.
+ *
+ * A configured initial balance is used as is. If it must match the chain (Mainnet and
+ * Testnet) and does not, that is a local accounting fault, so it is only logged and
+ * raised as a warning. Returns nullopt and sets `error` if an input is unavailable.
+ */
+static std::optional<CAmount> NextNSMValueBalance(
+    const Consensus::Params& consensusParams,
+    int nHeight,
+    std::optional<CAmount> parentBalance,
+    CAmount chainSupplyDelta,
+    std::optional<CAmount> chainTotalSupply,
+    std::string& error)
+{
+    const auto nu7Activation = consensusParams.GetActivationHeight(Consensus::UPGRADE_NU7);
+    // As in Zakura, only the seed can change the balance at genesis.
+    if (!nu7Activation.has_value() || nHeight < *nu7Activation - 1 || (nHeight == 0 && *nu7Activation != 1)) {
+        return 0;
+    }
+    if (nHeight == *nu7Activation - 1) {
+        std::optional<CAmount> derived;
+        if (chainTotalSupply.has_value()) {
+            derived = consensusParams.ScheduledIssuance(nHeight) - *chainTotalSupply;
+        }
+        const auto& configured = consensusParams.nInitialNSMValueBalance;
+        if (configured.has_value()) {
+            if (consensusParams.fCheckInitialNSMValueBalance && derived.has_value() && *derived != *configured) {
+                const std::string warning = strprintf(
+                    "Warning: the chain supply at height %d implies an initial NSM value balance of %d, "
+                    "but this network's INITIAL_NSM_VALUE_BALANCE is %d. The local chain supply "
+                    "accounting may be corrupt; consider restarting with -reindex.",
+                    nHeight, *derived, *configured);
+                LogPrintf("%s\n", warning);
+                SetMiscWarning(warning, GetTime());
+            }
+            return configured;
+        }
+        if (!derived.has_value()) {
+            error = strprintf(
+                "the initial NSM value balance at height %d cannot be derived because the chain total supply is unknown",
+                nHeight);
+            return std::nullopt;
+        }
+        return derived;
+    }
+    if (!parentBalance.has_value()) {
+        error = strprintf("the NSM value balance before height %d is unknown", nHeight);
+        return std::nullopt;
+    }
+    return *parentBalance + consensusParams.GetBlockSubsidy(nHeight) - chainSupplyDelta;
+}
+
 bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pindex,
                   CCoinsViewCache& view, const CChainParams& chainparams,
                   bool fJustCheck, CheckAs blockChecks)
@@ -3656,6 +3788,11 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
             pindex->hashSproutAnchor = tree.root();
             // The genesis block contained no JoinSplits
             pindex->hashFinalSproutRoot = pindex->hashSproutAnchor;
+            // Only a network with NU7 at height 1 seeds its NSM value balance here.
+            std::string nsmError;
+            const CAmount genesisSupplyDelta = pindex->nChainSupplyDelta.value_or(0);
+            pindex->nChainNSMValueBalance = NextNSMValueBalance(
+                consensusParams, pindex->nHeight, CAmount(0), genesisSupplyDelta, genesisSupplyDelta, nsmError);
         }
         return true;
     }
@@ -4452,7 +4589,28 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
         return state.DoS(100, error("%s: coinbase output value out of range at height %d", __func__, pindex->nHeight),
             REJECT_INVALID, "bad-cb-output-value-out-of-range");
     }
-    CAmount cbTotalInputValue = consensusParams.GetBlockSubsidy(pindex->nHeight) + nFees;
+    // ZIP 237: once reissuance starts, the block subsidy also pays out part of the NSM
+    // value balance after the parent block.
+    const std::optional<CAmount> parentNSMValueBalance =
+        pindex->pprev ? pindex->pprev->nChainNSMValueBalance : std::optional<CAmount>(0);
+    CAmount additionalSubsidy = 0;
+    if (consensusParams.IsNSMReissuanceActive(pindex->nHeight)) {
+        if (!parentNSMValueBalance.has_value()) {
+            // Startup recomputes the balance from the persisted chain supply deltas.
+            return AbortNode(state,
+                strprintf("%s: the NSM value balance before height %d is unknown", __func__, pindex->nHeight),
+                _("The NSM value balance is missing. Please restart zcashd, and if this persists, restart with -reindex."));
+        }
+        if (!MoneyRange(parentNSMValueBalance.value())) {
+            return state.DoS(100, error("%s: NSM value balance out of range before height %d", __func__, pindex->nHeight),
+                REJECT_INVALID, "bad-nsm-value-balance-out-of-range");
+        }
+        additionalSubsidy = consensusParams.AdditionalBlockSubsidy(pindex->nHeight, parentNSMValueBalance.value());
+    }
+    // ZIP 235: from NU7 the coinbase claims only the miner's share of the block's fees.
+    CAmount cbTotalInputValue =
+        consensusParams.GetBlockSubsidy(pindex->nHeight) + additionalSubsidy +
+        consensusParams.MinerFeeShare(pindex->nHeight, nFees);
     if (!MoneyRange(cbTotalInputValue)) {
         return state.DoS(100, error("%s: coinbase input value out of range at height %d", __func__, pindex->nHeight),
             REJECT_INVALID, "bad-cb-input-value-out-of-range");
@@ -4473,6 +4631,38 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
                 cbTotalInputValue - pindex->nLockboxValue,
                 pindex->nLockboxValue),
             REJECT_INVALID, "bad-cb-not-exact");
+    }
+
+    // ZIP 237: track the NSM value balance, which must never become negative.
+    {
+        std::optional<CAmount> chainTotalSupplyAfter;
+        if (pindex->pprev == nullptr) {
+            chainTotalSupplyAfter = chainSupplyDelta;
+        } else if (pindex->pprev->nChainTotalSupply.has_value()) {
+            chainTotalSupplyAfter = pindex->pprev->nChainTotalSupply.value() + chainSupplyDelta;
+        }
+        std::string nsmError;
+        const auto nsmValueBalance = NextNSMValueBalance(
+            consensusParams, pindex->nHeight, parentNSMValueBalance, chainSupplyDelta,
+            chainTotalSupplyAfter, nsmError);
+        if (!nsmValueBalance.has_value()) {
+            // Before reissuance the balance does not affect validity (and from then on a
+            // missing parent balance has stopped the node above), so only log it.
+            LogPrintf("%s: %s\n", __func__, nsmError);
+        } else if (nsmValueBalance.value() < 0) {
+            return state.DoS(100,
+                error("%s: NSM value balance would be negative (%d) at height %d", __func__,
+                      nsmValueBalance.value(), pindex->nHeight),
+                REJECT_INVALID, "bad-nsm-value-balance-negative");
+        } else if (nsmValueBalance.value() > MAX_MONEY) {
+            return state.DoS(100,
+                error("%s: NSM value balance out of range (%d) at height %d", __func__,
+                      nsmValueBalance.value(), pindex->nHeight),
+                REJECT_INVALID, "bad-nsm-value-balance-out-of-range");
+        }
+        if (!fJustCheck) {
+            pindex->nChainNSMValueBalance = nsmValueBalance;
+        }
     }
 
     // (The Sapling and Orchard bundle authorizations are validated earlier,
@@ -5230,8 +5420,7 @@ static bool ActivateBestChainStep(CValidationState& state, const CChainParams& c
     if (fBlocksDisconnected) {
         mempool.removeForReorg(pcoinsTip, chainActive.Tip()->nHeight + 1, STANDARD_LOCKTIME_VERIFY_FLAGS);
     }
-    mempool.removeWithoutBranchId(
-        CurrentEpochBranchId(chainActive.Tip()->nHeight + 1, chainparams.GetConsensus()));
+    RemoveMempoolTxsForOtherBranches(chainparams.GetConsensus());
     mempool.check(pcoinsTip);
 
     // Callbacks/notifications for a new best chain.
@@ -5360,8 +5549,7 @@ bool InvalidateBlock(CValidationState& state, const CChainParams& chainparams, C
         // unconditionally valid already, so force disconnect away from it.
         if (!DisconnectTip(state, chainparams)) {
             mempool.removeForReorg(pcoinsTip, chainActive.Tip()->nHeight + 1, STANDARD_LOCKTIME_VERIFY_FLAGS);
-            mempool.removeWithoutBranchId(
-                CurrentEpochBranchId(chainActive.Tip()->nHeight + 1, chainparams.GetConsensus()));
+            RemoveMempoolTxsForOtherBranches(chainparams.GetConsensus());
             return false;
         }
     }
@@ -5378,8 +5566,7 @@ bool InvalidateBlock(CValidationState& state, const CChainParams& chainparams, C
 
     InvalidChainFound(pindex, chainparams);
     mempool.removeForReorg(pcoinsTip, chainActive.Tip()->nHeight + 1, STANDARD_LOCKTIME_VERIFY_FLAGS);
-    mempool.removeWithoutBranchId(
-        CurrentEpochBranchId(chainActive.Tip()->nHeight + 1, chainparams.GetConsensus()));
+    RemoveMempoolTxsForOtherBranches(chainparams.GetConsensus());
     return true;
 }
 
@@ -5465,8 +5652,17 @@ CBlockIndex* AddToBlockIndex(const CBlockHeader& block, const Consensus::Params&
     }
     pindexNew->nChainWork = (pindexNew->pprev ? pindexNew->pprev->nChainWork : 0) + GetBlockProof(*pindexNew);
     pindexNew->RaiseValidity(BLOCK_VALID_TREE);
-    if (pindexBestHeader == NULL || pindexBestHeader->nChainWork < pindexNew->nChainWork)
+    if (pindexBestHeader == NULL || pindexBestHeader->nChainWork < pindexNew->nChainWork) {
+        // A higher best header can move RelayHeight onto the next branch before any block
+        // connects.
+        const int nextBlockHeight = chainActive.Height() + 1;
+        const uint32_t relayBranchBefore = CurrentEpochBranchId(RelayHeight(nextBlockHeight), consensusParams);
         pindexBestHeader = pindexNew;
+        if (chainActive.Tip() != nullptr &&
+                CurrentEpochBranchId(RelayHeight(nextBlockHeight), consensusParams) != relayBranchBefore) {
+            RemoveMempoolTxsForOtherBranches(consensusParams);
+        }
+    }
 
     setDirtyBlockIndex.insert(pindexNew);
 
@@ -5882,6 +6078,7 @@ bool SetChainPoolValues(
 
     pindex->nChainTotalSupply = std::nullopt;
     pindex->nChainTransparentValue = std::nullopt;
+    pindex->nChainNSMValueBalance = std::nullopt;
 
     pindex->nSproutValue = sproutValue;
     pindex->nSaplingValue = saplingValue;
@@ -6350,6 +6547,23 @@ bool ContextualCheckBlock(
             if (!IsFinalTx(tx, nHeight, nLockTimeCutoff)) {
                 return state.DoS(10, error("%s: contains a non-final transaction", __func__),
                                  REJECT_INVALID, "bad-txns-nonfinal");
+            }
+        }
+
+        // ZIP 218: from NU7, the block's shielded actions (coinbase included) are limited
+        // per pool and by a global budget.
+        if (consensusParams.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+            ShieldedActionCounts counts;
+            for (const CTransaction& tx : block.vtx) {
+                counts += ShieldedActionCounts(tx);
+            }
+            if (auto exceeded = counts.ExceededLimit()) {
+                return state.DoS(100,
+                    error("%s: block exceeds a ZIP 218 shielded limit (%s): %d Orchard actions, "
+                          "%d Ironwood actions, %d Sapling spends and outputs, %d JoinSplits",
+                          __func__, exceeded.value(), counts.orchardActions, counts.ironwoodActions,
+                          counts.saplingIOs, counts.sproutJoinSplits),
+                    REJECT_INVALID, exceeded.value());
             }
         }
     }
@@ -7062,6 +7276,28 @@ bool static LoadBlockIndexDB(const CChainParams& chainparams)
             // existing values match the checkpoint.
             if (!FallbackChainSupplyCheckpoint(pindex, chainparams)) {
                 return false;
+            }
+
+            // The NSM value balance is memory only. Recompute it from the persisted
+            // chain supply delta, now that the chain total supply is final. Skip failed
+            // blocks: ConnectBlock stores the delta before it checks the coinbase, so an
+            // overclaiming block's delta can make the balance negative. (ConnectBlock
+            // recomputes the balance if the block is reconsidered.)
+            pindex->nChainNSMValueBalance = std::nullopt;
+            if (!(pindex->nStatus & BLOCK_FAILED_MASK) &&
+                    (pindex->pprev == nullptr || pindex->pprev->nChainTx) && pindex->nChainSupplyDelta.has_value()) {
+                if (!MoneyDeltaRange(pindex->nChainSupplyDelta.value())) {
+                    return error("%s: chain supply delta out of range at height %d", __func__, pindex->nHeight);
+                }
+                std::string nsmError;
+                pindex->nChainNSMValueBalance = NextNSMValueBalance(
+                    chainparams.GetConsensus(), pindex->nHeight,
+                    pindex->pprev ? pindex->pprev->nChainNSMValueBalance : std::optional<CAmount>(0),
+                    pindex->nChainSupplyDelta.value(), pindex->nChainTotalSupply, nsmError);
+                if (pindex->nChainNSMValueBalance.has_value() && !MoneyRange(pindex->nChainNSMValueBalance.value())) {
+                    return error("%s: NSM value balance out of range at height %d. Please restart with -reindex.",
+                                 __func__, pindex->nHeight);
+                }
             }
 
             // If developer option -developersetpoolsizezero has been enabled,
@@ -8169,13 +8405,19 @@ bool static AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 
 void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParams)
 {
-    int currentHeight = GetHeight();
-
     std::deque<CInv>::iterator it = pfrom->vRecvGetData.begin();
 
     vector<CInv> vNotFound;
 
     LOCK(cs_main);
+    // Read under cs_main, so the branches below match the mempool and relay map.
+    const int currentHeight = chainActive.Height();
+
+    // A relayed transaction may no longer be valid for the branch at the next block or at
+    // RelayHeight, whatever removed it from the mempool, so getdata serves it only while
+    // both are its branch.
+    const uint32_t nextBranchId = CurrentEpochBranchId(currentHeight + 1, consensusParams);
+    const uint32_t relayBranchId = CurrentEpochBranchId(RelayHeight(currentHeight + 1), consensusParams);
 
     while (it != pfrom->vRecvGetData.end()) {
         // Don't bother if send buffer is too full to respond anyway
@@ -8279,11 +8521,14 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                 // Send stream from relay memory
                 bool push = false;
                 auto mi = mapRelay.find(inv.hash);
-                if (mi != mapRelay.end() && !IsExpiringSoonTx(*mi->second, currentHeight + 1)) {
+                if (mi != mapRelay.end() &&
+                    mi->second.branchId == nextBranchId && mi->second.branchId == relayBranchId &&
+                    !IsExpiringSoonTx(*mi->second.tx, currentHeight + 1)) {
+                    const CTransaction& relayedTx = *mi->second.tx;
                     // ZIP 239: MSG_TX should be used if and only if the tx is v4 or earlier.
-                    if ((mi->second->nVersion <= 4) != (inv.type == MSG_TX)) {
+                    if ((relayedTx.nVersion <= 4) != (inv.type == MSG_TX)) {
                         Misbehaving(pfrom->GetId(), 100);
-                        LogPrint("net", "Wrong INV message type used for v%d tx", mi->second->nVersion);
+                        LogPrint("net", "Wrong INV message type used for v%d tx", relayedTx.nVersion);
                         // Break so that this inv message will be erased from the queue
                         // (otherwise the peer would repeatedly hit this case until its
                         // Misbehaving level rises above -banscore, no matter what the
@@ -8292,8 +8537,8 @@ void static ProcessGetData(CNode* pfrom, const Consensus::Params& consensusParam
                     }
                     // Ensure we only reply with a transaction if it is exactly what the
                     // peer requested from us. Otherwise we add it to vNotFound below.
-                    if (inv.hashAux == mi->second->GetAuthDigest()) {
-                        pfrom->PushMessage("tx", *mi->second);
+                    if (inv.hashAux == relayedTx.GetAuthDigest()) {
+                        pfrom->PushMessage("tx", relayedTx);
                         push = true;
                     }
                 } else if (pfrom->timeLastMempoolReq) {
@@ -9774,7 +10019,10 @@ bool SendMessages(const Consensus::Params& params, CNode* pto)
                             vRelayExpiration.pop_front();
                         }
 
-                        auto ret = mapRelay.insert(std::make_pair(hash, std::move(txinfo.tx)));
+                        // RemoveMempoolTxsForOtherBranches keeps every mempool transaction
+                        // on the next block's branch.
+                        auto ret = mapRelay.insert(std::make_pair(
+                            hash, RelayedTx{std::move(txinfo.tx), CurrentEpochBranchId(currentHeight + 1, params)}));
                         if (ret.second) {
                             vRelayExpiration.push_back(std::make_pair(nNow + 15 * 60 * 1000000, ret.first));
                         }
@@ -9862,7 +10110,10 @@ bool SendMessages(const Consensus::Params& params, CNode* pto)
             NodeId staller = -1;
             FindNextBlocksToDownload(pto->GetId(), MAX_BLOCKS_IN_TRANSIT_PER_PEER - state.nBlocksInFlight, vToDownload, staller);
             for (CBlockIndex *pindex : vToDownload) {
-                vGetData.push_back(CInv(MSG_BLOCK, pindex->GetBlockHash()));
+                // Zakura answers a getdata only until it has sent 1 MB of blocks and drops the
+                // rest, which would then sit in flight until the download timeout. A request for
+                // a single block is always answered.
+                pto->PushMessage("getdata", std::vector<CInv>{CInv(MSG_BLOCK, pindex->GetBlockHash())});
                 MarkBlockAsInFlight(pto->GetId(), pindex->GetBlockHash(), params, pindex);
                 LogPrint("net", "Requesting block %s (%d) peer=%d\n", pindex->GetBlockHash().ToString(),
                     pindex->nHeight, pto->id);
@@ -9946,8 +10197,12 @@ CMutableTransaction CreateNewContextualCMutableTransaction(
             mtx.nConsensusBranchId = CurrentEpochBranchId(nHeight, consensusParams);
         }
 
-        bool blossomActive = consensusParams.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_BLOSSOM);
-        unsigned int defaultExpiryDelta = blossomActive ? DEFAULT_POST_BLOSSOM_TX_EXPIRY_DELTA : DEFAULT_PRE_BLOSSOM_TX_EXPIRY_DELTA;
+        unsigned int defaultExpiryDelta = DEFAULT_PRE_BLOSSOM_TX_EXPIRY_DELTA;
+        if (consensusParams.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+            defaultExpiryDelta = DEFAULT_POST_NU7_TX_EXPIRY_DELTA;
+        } else if (consensusParams.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_BLOSSOM)) {
+            defaultExpiryDelta = DEFAULT_POST_BLOSSOM_TX_EXPIRY_DELTA;
+        }
         mtx.nExpiryHeight = nHeight + (expiryDeltaArg ? expiryDeltaArg.value() : defaultExpiryDelta);
 
         // mtx.nExpiryHeight == 0 is valid for coinbase transactions

@@ -13,7 +13,8 @@ use orchard::{
     value::NoteValue,
     Bundle, Note,
 };
-use rand_core::OsRng;
+use rand_10::rngs::SysRng;
+use rand_core_10::UnwrapErr;
 use tracing::error;
 use zcash_primitives::transaction::{
     sighash::{signature_hash, SignableInput},
@@ -168,7 +169,7 @@ pub extern "C" fn orchard_builder_build(
     }
     let builder = unsafe { Box::from_raw(builder) };
 
-    match builder.build::<ZatBalance>(OsRng) {
+    match builder.build::<ZatBalance>(UnwrapErr(SysRng)) {
         Ok(Some((bundle, _))) => Box::into_raw(Box::new(bundle)),
         Ok(None) => {
             // The C++ side only calls `orchard_builder_build` when it expects the
@@ -213,7 +214,7 @@ pub extern "C" fn orchard_unauthorized_bundle_prove_and_sign(
         })
         .collect::<Vec<_>>();
 
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
     // Prove against the key for the circuit version the bundle was built for (chosen in
     // `orchard_builder_new`), which the bundle carries:
     // - the Nu6.3 ironwood circuit (`ORCHARD_PK_NU6_3`)

@@ -98,13 +98,16 @@ private:
     const CChainParams &chainparams;
     const int nHeight;
     const CAmount nFees;
+    const CAmount additionalSubsidy;
 
 public:
     AddOutputsToCoinbaseTxAndSign(
         CMutableTransaction &mtx,
         const CChainParams &chainparams,
         const int nHeight,
-        const CAmount nFees) : mtx(mtx), chainparams(chainparams), nHeight(nHeight), nFees(nFees) {}
+        const CAmount nFees,
+        const CAmount additionalSubsidy) :
+        mtx(mtx), chainparams(chainparams), nHeight(nHeight), nFees(nFees), additionalSubsidy(additionalSubsidy) {}
 
     const libzcash::Zip212Enabled GetZip212Flag() const {
         if (chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_CANOPY)) {
@@ -117,14 +120,12 @@ public:
     CAmount SetFoundersRewardAndGetMinerValue(sapling::Builder& saplingBuilder) const {
         const auto& consensus = chainparams.GetConsensus();
         const auto block_subsidy = consensus.GetBlockSubsidy(nHeight);
-        auto miner_reward = block_subsidy; // founders' reward or funding stream amounts will be subtracted below
 
         if (nHeight > 0) {
             if (chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_CANOPY)) {
                 LogPrint("pow", "%s: Constructing funding stream outputs for height %d", __func__, nHeight);
                 for (const auto& [fsinfo, fs] : consensus.GetActiveFundingStreams(nHeight)) {
                     const auto amount = fsinfo.Value(block_subsidy);
-                    miner_reward -= amount;
 
                     examine(fs.Recipient(consensus, nHeight), match {
                         [&](const libzcash::SaplingPaymentAddress& pa) {
@@ -146,9 +147,7 @@ public:
                 }
             } else if (nHeight <= chainparams.GetConsensus().GetLastFoundersRewardBlockHeight(nHeight)) {
                 // Founders reward is 20% of the block subsidy
-                const auto vFoundersReward = miner_reward / 5;
-                // Take some reward away from us
-                miner_reward -= vFoundersReward;
+                const auto vFoundersReward = block_subsidy / 5;
                 // And give it to the founders
                 mtx.vout.push_back(CTxOut(vFoundersReward, chainparams.GetFoundersRewardScriptAtHeight(nHeight)));
             } else {
@@ -168,9 +167,12 @@ public:
                 }
             }
         }
+        const CAmount miner_reward = MinerSubsidy(chainparams, nHeight);
         LogPrint("pow", "%s: Miner reward at height %d is %d", __func__, nHeight, miner_reward);
 
-        return miner_reward + nFees;
+        // ZIP 237 reissuance goes to the miner: funding streams never overlap it (see
+        // init.cpp). ZIP 235 leaves the miner only its share of the fees.
+        return miner_reward + additionalSubsidy + consensus.MinerFeeShare(nHeight, nFees);
     }
 
     void ComputeBindingSig(rust::Box<sapling::Builder> saplingBuilder, std::optional<orchard::UnauthorizedBundle> orchardBundle) const {
@@ -292,7 +294,42 @@ public:
     }
 };
 
-CMutableTransaction CreateCoinbaseTransaction(const CChainParams& chainparams, CAmount nFees, const MinerAddress& minerAddress, int nHeight)
+CAmount MinerSubsidy(const CChainParams& chainparams, int nHeight)
+{
+    const auto& consensus = chainparams.GetConsensus();
+    const CAmount blockSubsidy = consensus.GetBlockSubsidy(nHeight);
+    if (nHeight == 0) {
+        return blockSubsidy;
+    }
+    if (consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_CANOPY)) {
+        CAmount streams = 0;
+        for (const auto& [fsinfo, fs] : consensus.GetActiveFundingStreams(nHeight)) {
+            streams += fsinfo.Value(blockSubsidy);
+        }
+        return blockSubsidy - streams;
+    }
+    if (nHeight <= consensus.GetLastFoundersRewardBlockHeight(nHeight)) {
+        return blockSubsidy - blockSubsidy / 5;
+    }
+    return blockSubsidy;
+}
+
+uint64_t CoinbaseSaplingOutputs(const CChainParams& chainparams, const MinerAddress& minerAddress, int nHeight)
+{
+    const auto& consensus = chainparams.GetConsensus();
+    uint64_t outputs = std::holds_alternative<libzcash::SaplingPaymentAddress>(minerAddress) ? 1 : 0;
+    if (nHeight > 0 && consensus.NetworkUpgradeActive(nHeight, Consensus::UPGRADE_CANOPY)) {
+        for (const auto& [fsinfo, fs] : consensus.GetActiveFundingStreams(nHeight)) {
+            if (std::holds_alternative<libzcash::SaplingPaymentAddress>(fs.Recipient(consensus, nHeight))) {
+                outputs++;
+            }
+        }
+    }
+    return outputs;
+}
+
+CMutableTransaction CreateCoinbaseTransaction(
+    const CChainParams& chainparams, CAmount nFees, CAmount additionalSubsidy, const MinerAddress& minerAddress, int nHeight)
 {
         CMutableTransaction mtx = CreateNewContextualCMutableTransaction(
                 chainparams.GetConsensus(), nHeight,
@@ -310,7 +347,7 @@ CMutableTransaction CreateCoinbaseTransaction(const CChainParams& chainparams, C
 
         // Add outputs and sign
         std::visit(
-            AddOutputsToCoinbaseTxAndSign(mtx, chainparams, nHeight, nFees),
+            AddOutputsToCoinbaseTxAndSign(mtx, chainparams, nHeight, nFees, additionalSubsidy),
             minerAddress);
 
         mtx.vin[0].scriptSig = CScript() << nHeight << OP_0;
@@ -341,6 +378,9 @@ void BlockAssembler::resetBlock(const MinerAddress& minerAddress)
         [](const boost::shared_ptr<CReserveScript> &) { return 1000; },
     });
     nBlockSigOps = 100;
+
+    // CreateNewBlock reserves room for the coinbase's Sapling outputs.
+    blockShieldedCounts = ShieldedActionCounts();
 
     // These counters do not include coinbase tx
     nBlockTx = 0;
@@ -379,6 +419,9 @@ CBlockTemplate* BlockAssembler::CreateNewBlock(
     CBlockIndex* pindexPrev = chainActive.Tip();
     nHeight = pindexPrev->nHeight + 1;
     uint32_t consensusBranchId = CurrentEpochBranchId(nHeight, chainparams.GetConsensus());
+    // Reserve room for the coinbase's Sapling outputs, which are added after the
+    // transactions are selected.
+    blockShieldedCounts.saplingIOs = CoinbaseSaplingOutputs(chainparams, minerAddress, nHeight);
 
     // -regtest only: allow overriding block.nVersion with
     // -blockversion=N to test forking scenarios
@@ -434,9 +477,20 @@ CBlockTemplate* BlockAssembler::CreateNewBlock(
     if (next_cb_mtx) {
         pblock->vtx[0] = *next_cb_mtx;
     } else {
-        pblock->vtx[0] = CreateCoinbaseTransaction(chainparams, nFees, minerAddress, nHeight);
+        // ZIP 237: the coinbase also claims part of the NSM value balance after the parent.
+        CAmount additionalSubsidy = 0;
+        if (chainparams.GetConsensus().IsNSMReissuanceActive(nHeight)) {
+            if (!pindexPrev->nChainNSMValueBalance.has_value()) {
+                throw std::runtime_error(strprintf(
+                    "%s: the NSM value balance before height %d is unknown", __func__, nHeight));
+            }
+            additionalSubsidy = chainparams.GetConsensus().AdditionalBlockSubsidy(
+                nHeight, pindexPrev->nChainNSMValueBalance.value());
+        }
+        pblock->vtx[0] = CreateCoinbaseTransaction(chainparams, nFees, additionalSubsidy, minerAddress, nHeight);
     }
-    pblocktemplate->vTxFees[0] = -nFees;
+    // As in Zakura's getblocktemplate, the coinbase gains only the miner's ZIP 235 fee share.
+    pblocktemplate->vTxFees[0] = -chainparams.GetConsensus().MinerFeeShare(nHeight, nFees);
 
     // Update the Sapling commitment tree.
     for (const CTransaction& tx : pblock->vtx) {
@@ -566,6 +620,17 @@ bool BlockAssembler::TestForBlock(CTxMemPool::txiter iter)
     if (IsExpiredTx(iter->GetTx(), nHeight))
         return false;
 
+    // ZIP 218: from NU7 the block's shielded actions are limited.
+    if (chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+        ShieldedActionCounts counts = blockShieldedCounts;
+        counts += ShieldedActionCounts(iter->GetTx());
+        if (counts.ExceededLimit().has_value()) {
+            LogPrintf("%s: skipping tx %s: exceeds a ZIP 218 shielded limit.\n",
+                      __func__, iter->GetTx().GetHash().GetHex());
+            return false;
+        }
+    }
+
     if (chainparams.ZIP209Enabled()) {
         // Does this transaction lead to a turnstile violation?
 
@@ -616,6 +681,7 @@ void BlockAssembler::AddToBlock(CTxMemPool::txiter iter)
     nBlockSize += iter->GetTxSize();
     ++nBlockTx;
     nBlockSigOps += iter->GetSigOpCount();
+    blockShieldedCounts += ShieldedActionCounts(iter->GetTx());
     nFees += iter->GetFee();
     inBlock.insert(iter);
 

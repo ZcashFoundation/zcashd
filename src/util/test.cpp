@@ -466,6 +466,21 @@ void RegtestDeactivateNU6point3() {
     SelectParams(CBaseChainParams::MAIN);
 }
 
+const Consensus::Params& RegtestActivateNU7(bool updatePow, int nu7ActivationHeight) {
+    RegtestActivateNU6point3(updatePow, Consensus::NetworkUpgrade::ALWAYS_ACTIVE);
+    UpdateNetworkUpgradeParameters(Consensus::UPGRADE_NU7, nu7ActivationHeight);
+    return Params().GetConsensus();
+}
+
+const Consensus::Params& RegtestActivateNU7() {
+    return RegtestActivateNU7(false, Consensus::NetworkUpgrade::ALWAYS_ACTIVE);
+}
+
+void RegtestDeactivateNU7() {
+    UpdateNetworkUpgradeParameters(Consensus::UPGRADE_NU7, Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT);
+    RegtestDeactivateNU6point3();
+}
+
 libzcash::SaplingExtendedSpendingKey GetTestMasterSaplingSpendingKey() {
     SecureString mnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art");
     auto seed{MnemonicSeed::ForPhrase(English, mnemonic).value()};

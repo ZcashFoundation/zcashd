@@ -32,6 +32,10 @@ zcash_gtest_SOURCES = \
 	gtest/test_keystore.cpp \
 	gtest/test_libzcash_utils.cpp \
 	gtest/test_noteencryption.cpp \
+	gtest/test_nu7_diff_dump.cpp \
+	gtest/test_nu7_nsm.cpp \
+	gtest/test_nu7_subsidy.cpp \
+	gtest/test_nu7_transactions.cpp \
 	gtest/test_mempool.cpp \
 	gtest/test_mempoollimit.cpp \
 	gtest/test_merkletree.cpp \
