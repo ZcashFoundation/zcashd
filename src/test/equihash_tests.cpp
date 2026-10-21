@@ -8,10 +8,14 @@
 #endif
 
 #include "arith_uint256.h"
+#include "chainparams.h"
 #include "crypto/sha256.h"
 #include "crypto/equihash.h"
+#include "primitives/block.h"
+#include "streams.h"
 #include "test/test_bitcoin.h"
 #include "uint256.h"
+#include "version.h"
 
 #include <rust/equihash.h>
 
@@ -99,7 +103,11 @@ void TestEquihashValidator(unsigned int n, unsigned int k, const std::string &I,
         {(const unsigned char*)I.data(), I.size()},
         {V.begin(), V.size()},
         {minimal.data(), minimal.size()});
-    BOOST_CHECK(isValid == expected);
+    // Zakura's validator only accepts the 140-byte block header prefix (the input and the
+    // nonce), which every block has, so it rejects these vectors' short inputs whatever the
+    // solution. Zakura checks them against its reference validator instead, and
+    // validator_allbitsmatter checks a real header here.
+    BOOST_CHECK(isValid == (expected && I.size() + V.size() == 140));
 }
 
 #ifdef ENABLE_MINING
@@ -201,36 +209,23 @@ BOOST_AUTO_TEST_CASE(validator_testvectors) {
 }
 
 BOOST_AUTO_TEST_CASE(validator_allbitsmatter) {
-    // Initialize the state according to one of the test vectors above.
-    unsigned int n = 96;
-    unsigned int k = 5;
-    uint256 V = ArithToUint256(1);
-    std::string I = "Equihash is an asymmetric PoW based on the Generalised Birthday problem.";
-
-    // Encode the correct solution.
-    std::vector<uint32_t> soln = {2261, 15185, 36112, 104243, 23779, 118390, 118332, 130041, 32642, 69878, 76925, 80080, 45858, 116805, 92842, 111026, 15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132, 23460, 49807, 52426, 80391, 69567, 114474, 104973, 122568};
-    size_t cBitLen { n/(k+1) };
-    std::vector<unsigned char> sol_char = GetMinimalFromIndices(soln, cBitLen);
-
-    rust::Slice<const uint8_t> input{(unsigned char*)&I[0], I.size()};
-    rust::Slice<const uint8_t> nonce{V.begin(), V.size()};
+    // The Mainnet genesis block's solution, for its 140-byte header prefix.
+    const CBlock& genesis = Params(CBaseChainParams::MAIN).GenesisBlock();
+    CEquihashInput I{genesis};
+    CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+    ss << I;
+    rust::Slice<const uint8_t> input{(const unsigned char*)ss.data(), ss.size()};
+    rust::Slice<const uint8_t> nonce{genesis.nNonce.begin(), genesis.nNonce.size()};
+    const std::vector<unsigned char>& soln = genesis.nSolution;
 
     // Prove that the solution is valid.
-    BOOST_CHECK(equihash::is_valid(
-        n, k,
-        input,
-        nonce,
-        {sol_char.data(), sol_char.size()}));
+    BOOST_CHECK(equihash::is_valid(200, 9, input, nonce, {soln.data(), soln.size()}));
 
     // Changing any single bit of the encoded solution should make it invalid.
-    for (size_t i = 0; i < sol_char.size() * 8; i++) {
-        std::vector<unsigned char> mutated = sol_char;
+    for (size_t i = 0; i < soln.size() * 8; i++) {
+        std::vector<unsigned char> mutated = soln;
         mutated.at(i/8) ^= (1 << (i % 8));
-        BOOST_CHECK(!equihash::is_valid(
-            n, k,
-            input,
-            nonce,
-            {mutated.data(), mutated.size()}));
+        BOOST_CHECK(!equihash::is_valid(200, 9, input, nonce, {mutated.data(), mutated.size()}));
     }
 }
 

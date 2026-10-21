@@ -43,6 +43,21 @@ static constexpr uint32_t TX_EXPIRY_HEIGHT_THRESHOLD = 500000000;
 /** The number of blocks after Canopy activation after which v1 plaintexts will be rejected */
 static const unsigned int ZIP212_GRACE_PERIOD = 32256;
 
+/**
+ * ZIP 218 OrchardProtocolBlockActionLimit: from NU7, the most Orchard actions, and
+ * separately the most Ironwood actions, in a block (network rule)
+ */
+static const uint64_t ORCHARD_PROTOCOL_BLOCK_ACTION_LIMIT = 330;
+/** ZIP 218 SaplingBlockIOLimit: from NU7, the most Sapling spends plus outputs in a block (network rule) */
+static const uint64_t SAPLING_BLOCK_IO_LIMIT = 300;
+/**
+ * ZIP 218 SproutBlockJoinSplitLimit: from NU7, the most Sprout JoinSplits in a block
+ * (network rule). ZIP 2003 already rules them out by disallowing v4 transactions.
+ */
+static const uint64_t SPROUT_BLOCK_JOINSPLIT_LIMIT = 0;
+/** ZIP 218 GlobalShieldedBudget: from NU7, the most shielded cost in a block, see ShieldedActionCounts (network rule) */
+static const uint64_t GLOBAL_SHIELDED_BUDGET = 330;
+
 /** Flags for LockTime() */
 enum {
     /* Use GetMedianTimePast() instead of nTime for end point timestamp. */

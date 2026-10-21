@@ -110,9 +110,9 @@ $(CXXBRIDGE_H) $(CXXBRIDGE_CPP): $(CXXBRIDGE_RS)
 # "ccache <compiler>" prefix, so pass just the compiler (the last word) as the
 # Windows (gnullvm) Rust linker.
 RUST_TARGET_LINKER = $(lastword $(CC))
-# Opt-in zcash_unstable feature gate. Pass e.g. ZCASH_UNSTABLE=nu6.3 (judah-build.sh
-# does this) to compile the Rust side with --cfg zcash_unstable="nu6.3". Empty by
-# default so normal builds are unaffected. The inner quotes are escaped so they
+# Opt-in zcash_unstable feature gate. Pass e.g. ZCASH_UNSTABLE=nu7 to compile the
+# Rust side with --cfg zcash_unstable="nu7". Empty by default; no dependency reads
+# it since the switch to the Zakura Common crates. The inner quotes are escaped so they
 # survive into the shell recipe and reach rustc as a cfg string value.
 ZCASH_UNSTABLE ?=
 ZCASH_UNSTABLE_RUSTFLAG = $(if $(ZCASH_UNSTABLE),--cfg zcash_unstable=\"$(ZCASH_UNSTABLE)\")
@@ -121,7 +121,7 @@ ZCASH_UNSTABLE_RUSTFLAG = $(if $(ZCASH_UNSTABLE),--cfg zcash_unstable=\"$(ZCASH_
 ZCASH_UNSTABLE_CHECKCFG = --check-cfg cfg(zcash_unstable,values(\"nu6.3\",\"nu7\"))
 RUST_ENV_VARS = \
   RUSTC="$(RUSTC)" \
-  RUSTFLAGS="--cfg=rust_secp_no_symbol_renaming $(ZCASH_UNSTABLE_RUSTFLAG) $(ZCASH_UNSTABLE_CHECKCFG) --cfg=zcash_unstable=\"nu6.3\" -L native=$(abs_top_srcdir)/src/secp256k1/.libs" \
+  RUSTFLAGS="--cfg=rust_secp_no_symbol_renaming $(ZCASH_UNSTABLE_RUSTFLAG) $(ZCASH_UNSTABLE_CHECKCFG) -L native=$(abs_top_srcdir)/src/secp256k1/.libs" \
   CC="$(CC)" \
   CFLAGS="$(CFLAGS)" \
   CXX="$(CXX)" \

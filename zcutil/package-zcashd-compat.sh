@@ -14,6 +14,8 @@ Build prerequisites:
   - objcopy/strip (or llvm-objcopy/llvm-strip) must be available
 
 Outputs:
+  - zcashd-zebra-compat-<version>-<platform> (standalone stripped zcashd)
+  - zcashd-zebra-compat-<version>-<platform>.sha256
   - zcashd-zebra-compat-<version>-<platform>.tar.gz
   - zcashd-zebra-compat-<version>-<platform>-debug.tar.gz
   - zcashd-zebra-compat-<version>-<platform>.metadata.json
@@ -154,6 +156,15 @@ RUNTIME_ARCHIVE_BASENAME="zcashd-zebra-compat-${VERSION_TAG}-${PLATFORM_ID}"
 DEBUG_ARCHIVE_BASENAME="${RUNTIME_ARCHIVE_BASENAME}-debug"
 RUNTIME_ARCHIVE_PATH="${OUTPUT_DIR}/${RUNTIME_ARCHIVE_BASENAME}.tar.gz"
 DEBUG_ARCHIVE_PATH="${OUTPUT_DIR}/${DEBUG_ARCHIVE_BASENAME}.tar.gz"
+# Zakura downloads this standalone executable and pins its SHA-256. It is a copy of the
+# stripped, debuglinked staging binary, so it is byte-identical to ./bin/zcashd in the
+# runtime archive.
+RUNTIME_BINARY_BASENAME="${RUNTIME_ARCHIVE_BASENAME}"
+RUNTIME_BINARY_PATH="${OUTPUT_DIR}/${RUNTIME_BINARY_BASENAME}"
+
+cp "$RUNTIME_STAGING/bin/zcashd" "$RUNTIME_BINARY_PATH"
+chmod 0755 "$RUNTIME_BINARY_PATH"
+(cd "$OUTPUT_DIR" && sha256sum "$RUNTIME_BINARY_BASENAME" > "${RUNTIME_BINARY_BASENAME}.sha256")
 
 tar \
   --sort=name \
@@ -173,14 +184,18 @@ tar \
 
 RUNTIME_SHA256="$(sha256sum "$RUNTIME_ARCHIVE_PATH" | awk '{print $1}')"
 DEBUG_SHA256="$(sha256sum "$DEBUG_ARCHIVE_PATH" | awk '{print $1}')"
+RUNTIME_BINARY_SHA256="$(awk '{print $1}' "${RUNTIME_BINARY_PATH}.sha256")"
 RUNTIME_SIZE_BYTES="$(wc -c < "$RUNTIME_ARCHIVE_PATH" | tr -d ' ')"
 DEBUG_SIZE_BYTES="$(wc -c < "$DEBUG_ARCHIVE_PATH" | tr -d ' ')"
+RUNTIME_BINARY_SIZE_BYTES="$(wc -c < "$RUNTIME_BINARY_PATH" | tr -d ' ')"
 GIT_COMMIT="$(git rev-parse --verify HEAD)"
 ZCASHD_VERSION="$(./src/zcashd --version | awk '/version/{print $4}' | tr -d '\n')"
 
 RUNTIME_URL=""
 DEBUG_URL=""
+RUNTIME_BINARY_URL=""
 if [[ -n "$RELEASE_URL_BASE" ]]; then
+  RUNTIME_BINARY_URL="${RELEASE_URL_BASE}/${RUNTIME_BINARY_BASENAME}"
   RUNTIME_URL="${RELEASE_URL_BASE}/${RUNTIME_ARCHIVE_BASENAME}.tar.gz"
   DEBUG_URL="${RELEASE_URL_BASE}/${DEBUG_ARCHIVE_BASENAME}.tar.gz"
 fi
@@ -207,6 +222,12 @@ metadata = {
     "archive_member_cli_path": "./bin/zcash-cli",
     "url": "${RUNTIME_URL}",
   },
+  "runtime_binary": {
+    "filename": "${RUNTIME_BINARY_BASENAME}",
+    "sha256": "${RUNTIME_BINARY_SHA256}",
+    "size_bytes": int("${RUNTIME_BINARY_SIZE_BYTES}"),
+    "url": "${RUNTIME_BINARY_URL}",
+  },
   "debug": {
     "archive": "${DEBUG_ARCHIVE_BASENAME}.tar.gz",
     "sha256": "${DEBUG_SHA256}",
@@ -222,6 +243,8 @@ out.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\\n", encoding=
 PY
 
 echo "Created:"
+echo "  ${RUNTIME_BINARY_PATH}"
+echo "  ${RUNTIME_BINARY_PATH}.sha256"
 echo "  ${RUNTIME_ARCHIVE_PATH}"
 echo "  ${DEBUG_ARCHIVE_PATH}"
 echo "  ${OUTPUT_DIR}/${RUNTIME_ARCHIVE_BASENAME}.metadata.json"

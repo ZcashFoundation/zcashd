@@ -275,6 +275,14 @@ public:
     //! connected to a chain tip.
     std::optional<CAmount> nChainTotalSupply;
 
+    //! (memory only) The ZIP 237 NSM value balance after this block: value removed
+    //! from circulation (ZIP 235 fee contributions and the initial balance) that has
+    //! not yet been reissued. It is derived from nChainSupplyDelta, so it needs no
+    //! disk format change and is recomputed when the block index is loaded.
+    //!
+    //! Will be std::nullopt if the block has never been connected to a chain tip.
+    std::optional<CAmount> nChainNSMValueBalance;
+
     //! Change in value in the transparent pool produced by the action of the
     //! transparent inputs to and outputs from transactions in this block.
     //!
@@ -413,6 +421,7 @@ public:
 
         nChainSupplyDelta = std::nullopt;
         nChainTotalSupply = std::nullopt;
+        nChainNSMValueBalance = std::nullopt;
         nTransparentValue = std::nullopt;
         nChainTransparentValue = std::nullopt;
         nLockboxValue = 0;
@@ -474,6 +483,7 @@ public:
         nChainSupplyDelta = std::nullopt;
         nTransparentValue = std::nullopt;
         nChainTotalSupply = std::nullopt;
+        nChainNSMValueBalance = std::nullopt;
         nChainTransparentValue = std::nullopt;
         nSproutValue = std::nullopt;
         nChainSproutValue = std::nullopt;

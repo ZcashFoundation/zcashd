@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
 use group::{ff::Field, Group, GroupEncoding};
-use rand::{thread_rng, Rng};
+use rand_10::{rng as thread_rng, RngExt};
 use sapling::value::ValueCommitment;
 use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_protocol::value::ZatBalance;
@@ -13,7 +13,7 @@ pub(crate) fn test_only_invalid_sapling_bundle(
 ) -> Box<crate::sapling::Bundle> {
     let mut rng = thread_rng();
 
-    fn gen_array<R: Rng, const N: usize>(mut rng: R) -> [u8; N] {
+    fn gen_array<R: RngExt, const N: usize>(mut rng: R) -> [u8; N] {
         let mut tmp = [0; N];
         rng.fill(&mut tmp[..]);
         tmp
@@ -26,7 +26,7 @@ pub(crate) fn test_only_invalid_sapling_bundle(
             )
             .unwrap();
             let anchor = jubjub::Base::random(&mut rng);
-            let nullifier = sapling::Nullifier(rng.gen());
+            let nullifier = sapling::Nullifier(rng.random());
             let rk = redjubjub::VerificationKey::try_from(
                 jubjub::ExtendedPoint::random(&mut rng).to_bytes(),
             )

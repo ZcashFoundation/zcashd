@@ -81,11 +81,39 @@ static CBlock CreateGenesisBlock(uint32_t nTime, const uint256& nNonce, const st
  * + Contains no strange transactions
  */
 
-const arith_uint256 maxUint = UintToArith256(uint256S("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
+
+/**
+ * Checks the network upgrade table a network constructor just built: every upgrade
+ * has a protocol version, activation heights never decrease across upgrades, and
+ * (ZIP 259) a scheduled NU7 activation height on Mainnet or Testnet is a multiple
+ * of 3.
+ */
+static void ValidateUpgradeTable(const Consensus::Params& consensus, bool publicNetwork)
+{
+    std::optional<int> previousHeight;
+    for (int idx = Consensus::BASE_SPROUT; idx < Consensus::MAX_NETWORK_UPGRADES; idx++) {
+        // The test dummy and ZFUTURE are not part of the upgrade sequence.
+        if (idx == Consensus::UPGRADE_TESTDUMMY || idx == Consensus::UPGRADE_ZFUTURE) {
+            continue;
+        }
+        const auto& upgrade = consensus.vUpgrades[idx];
+        assert(upgrade.nProtocolVersion > 0);
+        if (upgrade.nActivationHeight == Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT) {
+            continue;
+        }
+        assert(!previousHeight.has_value() || upgrade.nActivationHeight >= *previousHeight);
+        previousHeight = upgrade.nActivationHeight;
+    }
+    const int nu7Height = consensus.vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight;
+    assert(!publicNetwork ||
+           nu7Height == Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT ||
+           nu7Height % 3 == 0);
+}
 
 class CMainParams : public CChainParams {
 public:
-    CMainParams() {
+    /** nu7ActivationHeight overrides the NU7 activation height (for tests). */
+    explicit CMainParams(std::optional<int> nu7ActivationHeight = std::nullopt) {
         keyConstants.strNetworkID = "main";
         strCurrencyUnits = "ZEC";
         keyConstants.bip44CoinType = 133; // As registered in https://github.com/satoshilabs/slips/blob/master/slip-0044.md
@@ -93,6 +121,7 @@ public:
         consensus.nSubsidySlowStartInterval = 20000;
         consensus.nPreBlossomSubsidyHalvingInterval = Consensus::PRE_BLOSSOM_HALVING_INTERVAL;
         consensus.nPostBlossomSubsidyHalvingInterval = POST_BLOSSOM_HALVING_INTERVAL(Consensus::PRE_BLOSSOM_HALVING_INTERVAL);
+        consensus.nPostNU7SubsidyHalvingInterval = POST_NU7_HALVING_INTERVAL(Consensus::PRE_BLOSSOM_HALVING_INTERVAL);
         consensus.nMajorityEnforceBlockUpgrade = 750;
         consensus.nMajorityRejectBlockOutdated = 950;
         consensus.nMajorityWindow = 4000;
@@ -102,11 +131,12 @@ public:
         consensus.nEquihashK = K;
         consensus.powLimit = uint256S("0007ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowAveragingWindow = 17;
-        assert(maxUint/UintToArith256(consensus.powLimit) >= consensus.nPowAveragingWindow);
+        consensus.nPostNU7PowAveragingWindow = Consensus::POST_NU7_POW_AVERAGING_WINDOW;
         consensus.nPowMaxAdjustDown = 32; // 32% adjustment down
         consensus.nPowMaxAdjustUp = 16; // 16% adjustment up
         consensus.nPreBlossomPowTargetSpacing = Consensus::PRE_BLOSSOM_POW_TARGET_SPACING;
         consensus.nPostBlossomPowTargetSpacing = Consensus::POST_BLOSSOM_POW_TARGET_SPACING;
+        consensus.nPostNU7PowTargetSpacing = Consensus::POST_NU7_POW_TARGET_SPACING;
         consensus.nPowAllowMinDifficultyBlocksAfterHeight = std::nullopt;
         consensus.fPowNoRetargeting = false;
         consensus.vUpgrades[Consensus::BASE_SPROUT].nProtocolVersion = 170002;
@@ -148,9 +178,22 @@ public:
         consensus.vUpgrades[Consensus::UPGRADE_NU6_2].nActivationHeight = 3364600;
         consensus.vUpgrades[Consensus::UPGRADE_NU6_3].nProtocolVersion = 170160;
         consensus.vUpgrades[Consensus::UPGRADE_NU6_3].nActivationHeight = 3428143;
+        // ZIP 204 assigns NU7 protocol version 170190 on Mainnet.
+        consensus.vUpgrades[Consensus::UPGRADE_NU7].nProtocolVersion = 170190;
+        consensus.vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight =
+            nu7ActivationHeight.value_or(3543405);
         consensus.vUpgrades[Consensus::UPGRADE_ZFUTURE].nProtocolVersion = 0x7FFFFFFF;
         consensus.vUpgrades[Consensus::UPGRADE_ZFUTURE].nActivationHeight =
             Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT;
+        // A test height need not be a multiple of 3, as on Zakura's configured testnets.
+        ValidateUpgradeTable(consensus, !nu7ActivationHeight.has_value());
+
+        // ZIP 237 INITIAL_NSM_VALUE_BALANCE: ScheduledIssuance(H) - IssuedSupply(H) for any
+        // H from the last pre-NU6 height to NU7ActivationHeight - 1, measured at 2,726,399.
+        // Zakura uses the same value; the balance derived at NU7ActivationHeight - 1 is
+        // checked against it.
+        consensus.nInitialNSMValueBalance = 36858445520;
+        consensus.fCheckInitialNSMValueBalance = true;
 
         consensus.nFundingPeriodLength = consensus.nPostBlossomSubsidyHalvingInterval / 48;
 
@@ -274,20 +317,31 @@ public:
                 nu6Activation,
                 nu6_1Activation);
 
-            // ZIP 214 Revision 2
-            // FPF uses a single address repeated 36 times, once for each funding period.
+            // ZIP 214 Revision 2, with the Revision 3 end height: if NU7 activates before
+            // the third halving, the streams end at HeightForHalving(3) under ZIP 218.
+            const auto nu7Activation = consensus.GetActivationHeight(Consensus::UPGRADE_NU7);
+            const int rev2EndHeight = Consensus::NU7AdjustedFundingStreamHeight(4406400, nu7Activation);
+            // FPF uses one address per funding period, 36 in total. ZIP 2008 replaces the
+            // recipient from the first period that starts after NU7 activation:
+            // N = AddressIndex(NU7ActivationHeight - 1) + 1.
             std::vector<std::string> fpf_addresses_h3(36, "t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow");
+            if (nu7Activation.has_value() && *nu7Activation - 1 >= nu6_1Activation) {
+                const int firstNewIndex = consensus.FundingPeriodIndex(nu6_1Activation, *nu7Activation - 1) + 1;
+                for (int i = firstNewIndex; i < (int) fpf_addresses_h3.size(); i++) {
+                    fpf_addresses_h3[i] = "t1MkHnkxVjNpNbCrSs3AJ8J7ZSp6NTYiUcG";
+                }
+            }
             consensus.AddZIP207FundingStream(
                 keyConstants,
                 Consensus::FS_FPF_ZCG_H3,
                 nu6_1Activation,
-                4406400,
+                rev2EndHeight,
                 fpf_addresses_h3);
             consensus.AddZIP207LockboxStream(
                 keyConstants,
                 Consensus::FS_CCF_H3,
                 nu6_1Activation,
-                4406400);
+                rev2EndHeight);
 
             // ZIP 271
             // For convenience of distribution, we split the lockbox contents into 10 equal chunks.
@@ -475,7 +529,8 @@ static CMainParams mainParams;
  */
 class CTestNetParams : public CChainParams {
 public:
-    CTestNetParams() {
+    /** nu7ActivationHeight overrides the NU7 activation height (for tests). */
+    explicit CTestNetParams(std::optional<int> nu7ActivationHeight = std::nullopt) {
         keyConstants.strNetworkID = "test";
         strCurrencyUnits = "TAZ";
         keyConstants.bip44CoinType = 1;
@@ -483,6 +538,7 @@ public:
         consensus.nSubsidySlowStartInterval = 20000;
         consensus.nPreBlossomSubsidyHalvingInterval = Consensus::PRE_BLOSSOM_HALVING_INTERVAL;
         consensus.nPostBlossomSubsidyHalvingInterval = POST_BLOSSOM_HALVING_INTERVAL(Consensus::PRE_BLOSSOM_HALVING_INTERVAL);
+        consensus.nPostNU7SubsidyHalvingInterval = POST_NU7_HALVING_INTERVAL(Consensus::PRE_BLOSSOM_HALVING_INTERVAL);
         consensus.nMajorityEnforceBlockUpgrade = 51;
         consensus.nMajorityRejectBlockOutdated = 75;
         consensus.nMajorityWindow = 400;
@@ -492,11 +548,12 @@ public:
         consensus.nEquihashK = K;
         consensus.powLimit = uint256S("07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowAveragingWindow = 17;
-        assert(maxUint/UintToArith256(consensus.powLimit) >= consensus.nPowAveragingWindow);
+        consensus.nPostNU7PowAveragingWindow = Consensus::POST_NU7_POW_AVERAGING_WINDOW;
         consensus.nPowMaxAdjustDown = 32; // 32% adjustment down
         consensus.nPowMaxAdjustUp = 16; // 16% adjustment up
         consensus.nPreBlossomPowTargetSpacing = Consensus::PRE_BLOSSOM_POW_TARGET_SPACING;
         consensus.nPostBlossomPowTargetSpacing = Consensus::POST_BLOSSOM_POW_TARGET_SPACING;
+        consensus.nPostNU7PowTargetSpacing = Consensus::POST_NU7_POW_TARGET_SPACING;
         consensus.nPowAllowMinDifficultyBlocksAfterHeight = 299187;
         consensus.fPowNoRetargeting = false;
         consensus.vUpgrades[Consensus::BASE_SPROUT].nProtocolVersion = 170002;
@@ -538,9 +595,18 @@ public:
         consensus.vUpgrades[Consensus::UPGRADE_NU6_2].nActivationHeight = 4052000;
         consensus.vUpgrades[Consensus::UPGRADE_NU6_3].nProtocolVersion = 170160;
         consensus.vUpgrades[Consensus::UPGRADE_NU6_3].nActivationHeight = 4134000;
+        // ZIP 204 assigns NU7 protocol version 170180 on Testnet.
+        consensus.vUpgrades[Consensus::UPGRADE_NU7].nProtocolVersion = 170180;
+        consensus.vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight = nu7ActivationHeight.value_or(4465026);
         consensus.vUpgrades[Consensus::UPGRADE_ZFUTURE].nProtocolVersion = 0x7FFFFFFF;
         consensus.vUpgrades[Consensus::UPGRADE_ZFUTURE].nActivationHeight =
             Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT;
+        // A test height need not be a multiple of 3, as on Zakura's configured testnets.
+        ValidateUpgradeTable(consensus, !nu7ActivationHeight.has_value());
+
+        // ZIP 237 INITIAL_NSM_VALUE_BALANCE, measured at 2,975,999 (as in Zakura).
+        consensus.nInitialNSMValueBalance = 55768414957;
+        consensus.fCheckInitialNSMValueBalance = true;
 
         consensus.nFundingPeriodLength = consensus.nPostBlossomSubsidyHalvingInterval / 48;
 
@@ -673,17 +739,21 @@ public:
             // There are 27 periods because the start height is after the second halving
             // on testnet and does not align with a period boundary.
             std::vector<std::string> fpf_addresses_h3(27, "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu");
+            // ZIP 214 Revision 3: if NU7 activates before the third halving, the streams end
+            // at HeightForHalving(3) under ZIP 218. They keep the same number of periods.
+            const int rev2EndHeight = Consensus::NU7AdjustedFundingStreamHeight(
+                4476000, consensus.GetActivationHeight(Consensus::UPGRADE_NU7));
             consensus.AddZIP207FundingStream(
                 keyConstants,
                 Consensus::FS_FPF_ZCG_H3,
                 nu6_1Activation,
-                4476000,
+                rev2EndHeight,
                 fpf_addresses_h3);
             consensus.AddZIP207LockboxStream(
                 keyConstants,
                 Consensus::FS_CCF_H3,
                 nu6_1Activation,
-                4476000);
+                rev2EndHeight);
 
             // ZIP 271
             // For testing purposes, we split the lockbox contents into 10 equal chunks.
@@ -728,6 +798,12 @@ public:
 
         static_assert(6 * Consensus::POST_BLOSSOM_POW_TARGET_SPACING * 7 < MAX_FUTURE_BLOCK_TIME_MTP - 60,
                       "MAX_FUTURE_BLOCK_TIME_MTP is too low given block target spacing");
+        // From NU7 the threshold is 18 times the 25-second spacing (ZIP 218), which is still
+        // 7.5 minutes.
+        static_assert(
+            Consensus::POST_NU7_MIN_DIFFICULTY_GAP_SPACINGS * Consensus::POST_NU7_POW_TARGET_SPACING * 7
+                < MAX_FUTURE_BLOCK_TIME_MTP - 60,
+            "MAX_FUTURE_BLOCK_TIME_MTP is too low given the NU7 block target spacing");
         consensus.nFutureTimestampSoftForkHeight = consensus.vUpgrades[Consensus::UPGRADE_BLOSSOM].nActivationHeight + 6;
 
         // The best chain should have at least this much work.
@@ -824,6 +900,7 @@ public:
         consensus.nSubsidySlowStartInterval = 0;
         consensus.nPreBlossomSubsidyHalvingInterval = Consensus::PRE_BLOSSOM_REGTEST_HALVING_INTERVAL;
         consensus.nPostBlossomSubsidyHalvingInterval = POST_BLOSSOM_HALVING_INTERVAL(Consensus::PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);
+        consensus.nPostNU7SubsidyHalvingInterval = POST_NU7_HALVING_INTERVAL(Consensus::PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);
         consensus.nMajorityEnforceBlockUpgrade = 750;
         consensus.nMajorityRejectBlockOutdated = 950;
         consensus.nMajorityWindow = 1000;
@@ -831,13 +908,14 @@ public:
         static_assert(equihash_parameters_acceptable(N, K));
         consensus.nEquihashN = N;
         consensus.nEquihashK = K;
-        consensus.powLimit = uint256S("0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"); // if this is any larger, the for loop in GetNextWorkRequired can overflow bnTot
+        consensus.powLimit = uint256S("0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f");
         consensus.nPowAveragingWindow = 17;
-        assert(maxUint/UintToArith256(consensus.powLimit) >= consensus.nPowAveragingWindow);
+        consensus.nPostNU7PowAveragingWindow = Consensus::POST_NU7_POW_AVERAGING_WINDOW;
         consensus.nPowMaxAdjustDown = 0; // Turn off adjustment down
         consensus.nPowMaxAdjustUp = 0; // Turn off adjustment up
         consensus.nPreBlossomPowTargetSpacing = Consensus::PRE_BLOSSOM_POW_TARGET_SPACING;
         consensus.nPostBlossomPowTargetSpacing = Consensus::POST_BLOSSOM_POW_TARGET_SPACING;
+        consensus.nPostNU7PowTargetSpacing = Consensus::POST_NU7_POW_TARGET_SPACING;
         consensus.nPowAllowMinDifficultyBlocksAfterHeight = 0;
         consensus.fPowNoRetargeting = true;
         consensus.vUpgrades[Consensus::BASE_SPROUT].nProtocolVersion = 170002;
@@ -878,9 +956,14 @@ public:
         consensus.vUpgrades[Consensus::UPGRADE_NU6_3].nProtocolVersion = 170160;
         consensus.vUpgrades[Consensus::UPGRADE_NU6_3].nActivationHeight =
             Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT;
+        // Regtest uses the Testnet protocol version (ZIP 204).
+        consensus.vUpgrades[Consensus::UPGRADE_NU7].nProtocolVersion = 170180;
+        consensus.vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight =
+            Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT;
         consensus.vUpgrades[Consensus::UPGRADE_ZFUTURE].nProtocolVersion = 0x7FFFFFFF;
         consensus.vUpgrades[Consensus::UPGRADE_ZFUTURE].nActivationHeight =
             Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT;
+        ValidateUpgradeTable(consensus, false);
 
         consensus.nFundingPeriodLength = consensus.nPostBlossomSubsidyHalvingInterval / 48;
         // Defined funding streams can be enabled with node config flags.
@@ -985,6 +1068,16 @@ public:
         consensus.nTemporaryOrchardDisablingSoftForkHeight = nHeight;
     }
 
+    void UpdateInitialNSMValueBalance(std::optional<CAmount> balance)
+    {
+        consensus.nInitialNSMValueBalance = balance;
+    }
+
+    void UpdateTestNSMReissuanceHeight(std::optional<int> nHeight)
+    {
+        consensus.nTestNSMReissuanceHeight = nHeight;
+    }
+
     void SetRegTestZIP209Enabled() {
         fZIP209Enabled = true;
     }
@@ -1016,6 +1109,16 @@ public:
 static CRegTestParams regTestParams;
 
 static const CChainParams* pCurrentParams = nullptr;
+
+std::unique_ptr<CChainParams> CreateChainParamsWithNU7ForTesting(const std::string& chain, int nu7ActivationHeight)
+{
+    if (chain == CBaseChainParams::MAIN) {
+        return std::make_unique<CMainParams>(nu7ActivationHeight);
+    } else if (chain == CBaseChainParams::TESTNET) {
+        return std::make_unique<CTestNetParams>(nu7ActivationHeight);
+    }
+    throw std::runtime_error(strprintf("%s: unsupported chain %s", __func__, chain));
+}
 
 const CChainParams& Params() {
     assert(pCurrentParams);
@@ -1139,4 +1242,14 @@ void UpdateRegtestPow(
 void UpdateRegtestTemporaryOrchardDisablingSoftForkHeight(int nHeight)
 {
     regTestParams.UpdateTemporaryOrchardDisablingSoftForkHeight(nHeight);
+}
+
+void UpdateRegtestInitialNSMValueBalance(std::optional<CAmount> balance)
+{
+    regTestParams.UpdateInitialNSMValueBalance(balance);
+}
+
+void UpdateRegtestNSMReissuanceHeightForTesting(std::optional<int> nHeight)
+{
+    regTestParams.UpdateTestNSMReissuanceHeight(nHeight);
 }

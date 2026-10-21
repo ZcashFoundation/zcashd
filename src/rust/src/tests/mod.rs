@@ -8,6 +8,7 @@ use sapling::constants::{
 mod key_components;
 mod mmr;
 mod notes;
+mod nu7;
 mod signatures;
 mod zip339;
 

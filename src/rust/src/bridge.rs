@@ -18,7 +18,7 @@ use crate::{
         none_orchard_bundle, orchard_bundle_from_raw_box, parse_orchard_bundle, Action, Bundle,
     },
     orchard_ffi::{orchard_batch_validation_init, BatchValidator as OrchardBatchValidator},
-    params::{network, Network},
+    params::{branch_id, network, Network},
     sapling::{
         apply_sapling_bundle_signatures, build_sapling_bundle, finish_bundle_assembly,
         init_batch_validator as init_sapling_batch_validator, init_verifier, new_bundle_assembler,
@@ -83,7 +83,9 @@ pub(crate) mod ffi {
             nu6_1: i32,
             nu6_2: i32,
             nu6_3: i32,
+            nu7: i32,
         ) -> Result<Box<Network>>;
+        fn branch_id(network: &Network, height: u32) -> u32;
     }
 
     #[cfg(not(test))]

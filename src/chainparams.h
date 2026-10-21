@@ -12,6 +12,7 @@
 #include "primitives/block.h"
 #include "protocol.h"
 
+#include <memory>
 #include <vector>
 
 #include <rust/bridge.h>
@@ -59,7 +60,8 @@ public:
             consensus.vUpgrades[Consensus::UPGRADE_NU6].nActivationHeight,
             consensus.vUpgrades[Consensus::UPGRADE_NU6_1].nActivationHeight,
             consensus.vUpgrades[Consensus::UPGRADE_NU6_2].nActivationHeight,
-            consensus.vUpgrades[Consensus::UPGRADE_NU6_3].nActivationHeight);
+            consensus.vUpgrades[Consensus::UPGRADE_NU6_3].nActivationHeight,
+            consensus.vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight);
     }
     const CMessageHeader::MessageStartChars& MessageStart() const { return pchMessageStart; }
     int GetDefaultPort() const { return nDefaultPort; }
@@ -192,6 +194,15 @@ const CChainParams& Params(const std::string& chain);
 void SelectParams(const std::string& chain);
 
 /**
+ * Builds a separate copy of the Mainnet or Testnet parameters with the NU7 activation
+ * height set to nu7ActivationHeight, deriving every NU7-dependent value (such as the
+ * ZIP 214 Revision 3 funding stream end heights and the ZIP 2008 address list) exactly
+ * as the real parameters do. Unlike a real height, it need not be a multiple of 3. For
+ * tests only; the global params are not affected.
+ */
+std::unique_ptr<CChainParams> CreateChainParamsWithNU7ForTesting(const std::string& chain, int nu7ActivationHeight);
+
+/**
  * Allows modifying the network upgrade regtest parameters.
  */
 void UpdateNetworkUpgradeParameters(Consensus::UpgradeIndex idx, int nActivationHeight);
@@ -218,5 +229,18 @@ void UpdateOnetimeLockboxDisbursementParameters(
  * Allows modifying the regtest temporary Orchard disabling soft fork.
  */
 void UpdateRegtestTemporaryOrchardDisablingSoftForkHeight(int nHeight);
+
+/**
+ * Sets the regtest ZIP 237 INITIAL_NSM_VALUE_BALANCE, or with nullopt derives it from the
+ * chain supply at NU7ActivationHeight - 1 (the default).
+ */
+void UpdateRegtestInitialNSMValueBalance(std::optional<CAmount> balance);
+
+/**
+ * For tests only: starts regtest ZIP 237 NSM reissuance at nHeight (not before NU7), or
+ * with nullopt restores the derived height, which regtest never reaches. As in Zakura,
+ * no node option sets this.
+ */
+void UpdateRegtestNSMReissuanceHeightForTesting(std::optional<int> nHeight);
 
 #endif // BITCOIN_CHAINPARAMS_H

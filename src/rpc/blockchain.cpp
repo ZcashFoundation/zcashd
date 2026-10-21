@@ -1116,6 +1116,7 @@ UniValue getblockchaininfo(const UniValue& params, bool fHelp)
             "          \"chainValueZat\": xxxxxx,   (numeric, optional) total amount in the pool, in " + MINOR_CURRENCY_UNIT + "\n"
             "      }, ...\n"
             "  ]\n"
+            "  \"nsmValueBalanceZat\": xxxxxx, (numeric, optional) the ZIP 237 NSM value balance after the tip (value removed from circulation and not yet reissued), in " + MINOR_CURRENCY_UNIT + "\n"
             "  \"softforks\": [            (array) status of softforks in progress\n"
             "     {\n"
             "        \"id\": \"xxxx\",        (string) name of softfork\n"
@@ -1180,6 +1181,11 @@ UniValue getblockchaininfo(const UniValue& params, bool fHelp)
     valuePools.push_back(ValuePoolDesc("ironwood", tip->nChainIronwoodValue, std::nullopt));
     valuePools.push_back(ValuePoolDesc("lockbox", tip->nChainLockboxValue, std::nullopt));
     obj.pushKV("valuePools",            valuePools);
+    // ZIP 237: value removed from circulation and not yet reissued. It is not a value
+    // pool and is not part of chainSupply. As in Zakura, it is omitted if unknown.
+    if (tip->nChainNSMValueBalance.has_value()) {
+        obj.pushKV("nsmValueBalanceZat", tip->nChainNSMValueBalance.value());
+    }
 
     const CChainParams& chainparams = Params();
     const Consensus::Params& consensusParams = chainparams.GetConsensus();

@@ -2,8 +2,15 @@
 
 #include "chainparams.h"
 #include "consensus/upgrades.h"
+#include "util/test.h"
+#include "version.h"
 
 #include <optional>
+#include <set>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 class UpgradesTest : public ::testing::Test {
 protected:
@@ -27,6 +34,59 @@ TEST(MainnetUpgradeTest, NU6_3Activation) {
         activationHeight - 1, Consensus::UPGRADE_NU6_3));
     EXPECT_TRUE(params.NetworkUpgradeActive(
         activationHeight, Consensus::UPGRADE_NU6_3));
+}
+
+TEST(UpgradeTable, Complete) {
+    std::set<uint32_t> branchIds;
+    for (int i = Consensus::BASE_SPROUT; i < Consensus::MAX_NETWORK_UPGRADES; i++) {
+        const auto& info = NetworkUpgradeInfo[i];
+        EXPECT_FALSE(info.strName.empty()) << "upgrade index " << i;
+        EXPECT_TRUE(branchIds.insert(info.nBranchId).second) << info.strName;
+        EXPECT_EQ(info.nBranchId == 0, i == Consensus::BASE_SPROUT) << info.strName;
+    }
+    EXPECT_EQ(NetworkUpgradeInfo[Consensus::UPGRADE_NU7].nBranchId, 0x77190ad9);
+    EXPECT_EQ(NetworkUpgradeInfo[Consensus::UPGRADE_NU7].strName, "NU7");
+    EXPECT_EQ(Consensus::UPGRADE_NU7 + 1, Consensus::UPGRADE_ZFUTURE);
+    EXPECT_EQ(NetworkUpgradeInfo[Consensus::UPGRADE_ZFUTURE].nBranchId, 0xffffffff);
+
+    // ZIP 204: NU7 is 170190 on Mainnet and 170180 on Testnet and Regtest.
+    // The public activation heights match Zakura; default Regtest stays unscheduled.
+    constexpr int unscheduled = Consensus::NetworkUpgrade::NO_ACTIVATION_HEIGHT;
+    for (const auto& [network, protocolVersion, activationHeight] : std::vector<std::tuple<std::string, int, int>>{
+             {CBaseChainParams::MAIN, 170190, 3543405},
+             {CBaseChainParams::TESTNET, 170180, 4465026},
+             {CBaseChainParams::REGTEST, 170180, unscheduled}}) {
+        const auto& nu7 = Params(network).GetConsensus().vUpgrades[Consensus::UPGRADE_NU7];
+        EXPECT_EQ(nu7.nProtocolVersion, protocolVersion) << network;
+        EXPECT_EQ(nu7.nActivationHeight, activationHeight) << network;
+        EXPECT_GE(PROTOCOL_VERSION, nu7.nProtocolVersion) << network;
+    }
+}
+
+TEST(UpgradeTable, RustBranchIdMatchesCpp) {
+    auto expectSameBranchIds = [](const CChainParams& chainparams) {
+        const auto& params = chainparams.GetConsensus();
+        auto rustNetwork = chainparams.RustNetwork();
+        for (int i = Consensus::UPGRADE_OVERWINTER; i < Consensus::UPGRADE_ZFUTURE; i++) {
+            const int activationHeight = params.vUpgrades[i].nActivationHeight;
+            if (activationHeight <= 0) {
+                continue;
+            }
+            for (int height : {activationHeight - 1, activationHeight}) {
+                EXPECT_EQ(consensus::branch_id(*rustNetwork, height), CurrentEpochBranchId(height, params))
+                    << chainparams.NetworkIDString() << " height " << height;
+            }
+        }
+    };
+    expectSameBranchIds(Params(CBaseChainParams::MAIN));
+    expectSameBranchIds(Params(CBaseChainParams::TESTNET));
+
+    const auto& params = RegtestActivateNU7(false, 150);
+    auto rustNetwork = Params().RustNetwork();
+    EXPECT_EQ(consensus::branch_id(*rustNetwork, 149), NetworkUpgradeInfo[Consensus::UPGRADE_NU6_3].nBranchId);
+    EXPECT_EQ(consensus::branch_id(*rustNetwork, 150), 0x77190ad9);
+    EXPECT_EQ(CurrentEpochBranchId(150, params), 0x77190ad9);
+    RegtestDeactivateNU7();
 }
 
 TEST_F(UpgradesTest, NetworkUpgradeState) {

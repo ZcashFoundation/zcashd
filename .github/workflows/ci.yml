@@ -433,6 +433,28 @@ jobs:
           GTEST_SHARD_INDEX: ${{ matrix.shard_index }}
         run: ${{ format('./src/zcash-gtest{0}', matrix.file_ext) }}
 
+  nu7-differential:
+    name: NU7 differential check against Zakura
+    needs: [setup, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Download src artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: zcashd-ubuntu-22.04
+          path: ./src
+
+      - name: Make artifact executable
+        run: chmod +x ./src/zcash-gtest
+
+      - name: Test the NU7 dump comparer
+        run: python3 qa/zcash/nu7-diff/test_compare.py
+
+      - name: Compare zcashd's NU7 values with Zakura's
+        run: ./qa/zcash/nu7-diff/run.sh --fail-on-diff
+
   test-rust:
     name: Rust test tier ${{ matrix.tier }} platform ${{ matrix.platform }}
     needs: [setup, build]

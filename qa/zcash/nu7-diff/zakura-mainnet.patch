@@ -1,0 +1,53 @@
+diff --git a/crates/zakura-consensus/tests/nu7_diff_dump.rs b/crates/zakura-consensus/tests/nu7_diff_dump.rs
+index 0f74bb1ae..8f1fb0c6f 100644
+--- a/crates/zakura-consensus/tests/nu7_diff_dump.rs
++++ b/crates/zakura-consensus/tests/nu7_diff_dump.rs
+@@ -641,15 +641,15 @@ fn run_scenario(sc: &Scenario, net: &Network, out: &mut Vec<Rec>, notes: &mut Ve
+     if do_difficulty {
+         const PRE: [i64; 12] = [37, 75, 90, 60, 150, 20, 25, 25, 10, 500, 75, 30];
+         const POST: [i64; 12] = [12, 25, 30, 20, 50, 25, 8, 40, 25, 480, 25, 460];
+-        let (start, end) = if is_testnet {
+-            (a - 200, a + 300)
+-        } else {
++        let (start, end) = if net.is_regtest() {
+             (1, 600)
+-        };
+-        let start_bits = if is_testnet {
+-            CompactDifficulty::from_le_bytes(0x1f07ffffu32.to_le_bytes())
+         } else {
++            (a - 200, a + 300)
++        };
++        let start_bits = if net.is_regtest() {
+             net.target_difficulty_limit().to_compact()
++        } else {
++            CompactDifficulty::from_le_bytes(0x1f07ffffu32.to_le_bytes())
+         };
+         difficulty_chain(
+             net,
+@@ -672,7 +672,7 @@ fn run_scenario(sc: &Scenario, net: &Network, out: &mut Vec<Rec>, notes: &mut Ve
+
+         // D2: near the target spacing and away from the PoW limit, with a slow and then a
+         // fast stretch on each side of NU7 to reach the adjustment bounds.
+-        if is_testnet {
++        if !net.is_regtest() {
+             const PRE2: [i64; 12] = [60, 90, 75, 70, 80, 75, 65, 85, 75, 72, 78, 75];
+             const POST2: [i64; 12] = [20, 30, 25, 23, 27, 25, 22, 28, 25, 24, 26, 25];
+             let d2_bits = CompactDifficulty::from_le_bytes(0x1d00ffffu32.to_le_bytes());
+@@ -890,6 +890,17 @@ fn nu7_diff_dump() {
+             },
+             Ok(Network::new_default_testnet()),
+         ),
++        (
++            Scenario {
++                name: "mainnet-real",
++                a: 3_543_405,
++                lo: 3_541_405,
++                hi: 15_543_405,
++                is_testnet: false,
++                do_difficulty: true,
++            },
++            Ok(Network::Mainnet),
++        ),
+         (
+             Scenario {
+                 name: "regtest-R",

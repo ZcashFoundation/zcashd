@@ -358,6 +358,24 @@ public:
 /// permanent unsupport (never "not yet available"): the wallet descope is final.
 extern const std::string IRONWOOD_WALLET_UNSUPPORTED;
 
+/// Error when a transaction would spend Sprout notes at NU7 heights or later. ZIP 2003
+/// makes v4 transactions, the only ones that carry Sprout JoinSplits, invalid from NU7.
+class SproutUnsupportedError {
+public:
+    SproutUnsupportedError() { }
+};
+
+/// Error when a transaction would have more Sapling spends and outputs than a block may
+/// hold from NU7 (ZIP 218), so it could never be mined.
+class ExcessShieldedActionsError {
+public:
+    uint64_t saplingIOs;
+    uint64_t limit;
+
+    ExcessShieldedActionsError(uint64_t saplingIOs, uint64_t limit):
+        saplingIOs(saplingIOs), limit(limit) { }
+};
+
 typedef std::variant<
     AddressResolutionError,
     InvalidFundsError,
@@ -366,7 +384,9 @@ typedef std::variant<
     AbsurdFeeError,
     MaxFeeError,
     ExcessOrchardActionsError,
-    IronwoodUnsupportedError> InputSelectionError;
+    IronwoodUnsupportedError,
+    SproutUnsupportedError,
+    ExcessShieldedActionsError> InputSelectionError;
 
 class InputSelection {
 private:

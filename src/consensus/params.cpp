@@ -11,6 +11,8 @@
 #include "util/system.h"
 #include "util/match.h"
 
+#include <limits>
+
 namespace Consensus {
     /**
      * General information about each funding stream.
@@ -111,11 +113,25 @@ namespace Consensus {
     }
 
     int Params::Halving(int nHeight) const {
-        // zip208
+        // zip208, zip218
         // Halving(height) :=
         // floor((height - SlowStartShift) / PreBlossomHalvingInterval), if not IsBlossomActivated(height)
-        // floor((BlossomActivationHeight - SlowStartShift) / PreBlossomHalvingInterval + (height - BlossomActivationHeight) / PostBlossomHalvingInterval), otherwise
-        if (NetworkUpgradeActive(nHeight, Consensus::UPGRADE_BLOSSOM)) {
+        // floor((BlossomActivationHeight - SlowStartShift) / PreBlossomHalvingInterval + (height - BlossomActivationHeight) / PostBlossomHalvingInterval), if IsBlossomActivated(height) and not IsNU7Activated(height)
+        // floor((BlossomActivationHeight - SlowStartShift) / PreBlossomHalvingInterval + (NU7ActivationHeight - BlossomActivationHeight) / PostBlossomHalvingInterval
+        //       + (height - NU7ActivationHeight) / PostNU7HalvingInterval), otherwise
+        if (NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+            assert(NetworkUpgradeActive(nHeight, Consensus::UPGRADE_BLOSSOM));
+            int64_t blossomActivationHeight = vUpgrades[Consensus::UPGRADE_BLOSSOM].nActivationHeight;
+            int64_t nu7ActivationHeight = vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight;
+            // As for Blossom, scale by the NU7 interval to keep the sum in integers:
+            // PostNU7HalvingInterval = PreBlossomHalvingInterval * 2 * 3.
+            int64_t scaledHalvings =
+                ((blossomActivationHeight - SubsidySlowStartShift())
+                    * Consensus::BLOSSOM_POW_TARGET_SPACING_RATIO * Consensus::NU7_POW_TARGET_SPACING_RATIO)
+                + ((nu7ActivationHeight - blossomActivationHeight) * Consensus::NU7_POW_TARGET_SPACING_RATIO)
+                + (nHeight - nu7ActivationHeight);
+            return (int) (scaledHalvings / nPostNU7SubsidyHalvingInterval);
+        } else if (NetworkUpgradeActive(nHeight, Consensus::UPGRADE_BLOSSOM)) {
             int64_t blossomActivationHeight = vUpgrades[Consensus::UPGRADE_BLOSSOM].nActivationHeight;
             // Ideally we would say:
             // halvings = (blossomActivationHeight - SubsidySlowStartShift()) / nPreBlossomSubsidyHalvingInterval
@@ -182,18 +198,60 @@ namespace Consensus {
         return HalvingHeight(nHeight, 1) - 1;
     }
 
+    std::optional<int> Params::HeightForHalving(int halvingIndex) const {
+        if (halvingIndex <= 0) {
+            return 0;
+        }
+        if (Halving(std::numeric_limits<int>::max()) < halvingIndex) {
+            return std::nullopt;
+        }
+        // Halving() is non-decreasing in height, so binary search its whole domain.
+        int low = 0;
+        int high = std::numeric_limits<int>::max();
+        while (low < high) {
+            int middle = low + (high - low) / 2;
+            if (Halving(middle) < halvingIndex) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return low;
+    }
+
+    int64_t Params::FundingStreamAddressPeriod(int nHeight) const {
+        // zip207 Revision 2
+        // AddressPeriod(height) :=
+        // floor((height + PostBlossomHalvingInterval - HeightForHalving(1)) / AddressChangeInterval), if not IsNU7Activated(height)
+        // floor((R * (A + PostBlossomHalvingInterval - HeightForHalving(1)) + height - A) / (R * AddressChangeInterval)), otherwise
+        // where A = NU7ActivationHeight and R = NU7PoWTargetSpacingRatio.
+        const int64_t firstHalvingHeight = HeightForHalving(1).value();
+        auto periodOffset = [&](int64_t height) {
+            return height - firstHalvingHeight + nPostBlossomSubsidyHalvingInterval;
+        };
+        // The offsets can be negative on regtest, so round towards negative infinity
+        // as the specification's floor does.
+        auto floorDiv = [](int64_t numerator, int64_t denominator) {
+            int64_t quotient = numerator / denominator;
+            return (numerator % denominator != 0 && numerator < 0) ? quotient - 1 : quotient;
+        };
+        if (NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+            const int64_t nu7ActivationHeight = vUpgrades[Consensus::UPGRADE_NU7].nActivationHeight;
+            return floorDiv(
+                Consensus::NU7_POW_TARGET_SPACING_RATIO * periodOffset(nu7ActivationHeight)
+                    + (nHeight - nu7ActivationHeight),
+                Consensus::NU7_POW_TARGET_SPACING_RATIO * int64_t(nFundingPeriodLength));
+        }
+        return floorDiv(periodOffset(nHeight), nFundingPeriodLength);
+    }
+
     int Params::FundingPeriodIndex(int fundingStreamStartHeight, int nHeight) const {
         assert(fundingStreamStartHeight <= nHeight);
 
-        int firstHalvingHeight = HalvingHeight(fundingStreamStartHeight, 1);
-
-        // If the start height of the funding period is not aligned to a multiple of the
-        // funding period length, the first funding period will be shorter than the
-        // funding period length.
-        auto startPeriodOffset = (fundingStreamStartHeight - firstHalvingHeight) % nFundingPeriodLength;
-        if (startPeriodOffset < 0) startPeriodOffset += nFundingPeriodLength; // C++ '%' is remainder, not modulus!
-
-        return (nHeight - fundingStreamStartHeight + startPeriodOffset) / nFundingPeriodLength;
+        // AddressIndex(height) := AddressPeriod(height) - AddressPeriod(StartHeight).
+        // A start height that is not aligned to a period boundary makes the first
+        // funding period shorter than the others.
+        return (int) (FundingStreamAddressPeriod(nHeight) - FundingStreamAddressPeriod(fundingStreamStartHeight));
     }
 
     std::variant<FundingStream, FundingStreamError> FundingStream::ValidateFundingStream(
@@ -398,12 +456,133 @@ namespace Consensus {
         // SlowStartRate · (height + 1), if SlowStartInterval / 2 ≤ height and height < SlowStartInterval
         // floor(MaxBlockSubsidy / 2^Halving(height)), if SlowStartInterval ≤ height and not IsBlossomActivated(height)
         // floor(MaxBlockSubsidy / (BlossomPoWTargetSpacingRatio · 2^Halving(height))), otherwise
-        if (this->NetworkUpgradeActive(nHeight, Consensus::UPGRADE_BLOSSOM)) {
+        // floor(MaxBlockSubsidy / (BlossomPoWTargetSpacingRatio · NU7PoWTargetSpacingRatio · 2^Halving(height))), if IsNU7Activated(height) (zip218)
+        if (this->NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+            return (nSubsidy / (Consensus::BLOSSOM_POW_TARGET_SPACING_RATIO * Consensus::NU7_POW_TARGET_SPACING_RATIO)) >> halvings;
+        } else if (this->NetworkUpgradeActive(nHeight, Consensus::UPGRADE_BLOSSOM)) {
             return (nSubsidy / Consensus::BLOSSOM_POW_TARGET_SPACING_RATIO) >> halvings;
         } else {
             // Subsidy is cut in half every 840,000 blocks which will occur approximately every 4 years.
             return nSubsidy >> halvings;
         }
+    }
+
+    CAmount Params::MinerFeeShare(int nHeight, CAmount nFees) const {
+        assert(MoneyRange(nFees));
+        if (!NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+            return nFees;
+        }
+        // NSMFeeContribution := floor(6 * TransactionFees / 10), over the whole block.
+        return nFees - (nFees * 6) / 10;
+    }
+
+    /**
+     * The lowest height above `height` at which the scheduled block subsidy may change:
+     * the next halving or the next target spacing era (Blossom or NU7), if any.
+     */
+    static std::optional<int> NextSubsidyBoundary(const Params& params, int height) {
+        std::optional<int> boundary = params.HeightForHalving(params.Halving(height) + 1);
+        for (auto idx : {Consensus::UPGRADE_BLOSSOM, Consensus::UPGRADE_NU7}) {
+            auto era = params.GetActivationHeight(idx);
+            if (era.has_value() && *era > height && (!boundary.has_value() || *era < *boundary)) {
+                boundary = era;
+            }
+        }
+        return boundary;
+    }
+
+    CAmount Params::ScheduledIssuance(int nHeight) const {
+        CAmount total = 0;
+
+        // The slow start pays rate * h below its shift and rate * (h + 1) from the shift
+        // to its end (see GetBlockSubsidy), so each phase sums consecutive integers.
+        const int64_t interval = nSubsidySlowStartInterval;
+        const int64_t shift = SubsidySlowStartShift();
+        if (interval > 0 && shift > 0 && nHeight >= 1) {
+            const CAmount rate = CAmount(12.5 * COIN) / interval;
+            auto sumFromOneThrough = [](int64_t n) { return n * (n + 1) / 2; };
+            const int64_t slowStartEnd = std::min<int64_t>(nHeight, interval - 1);
+            total += rate * sumFromOneThrough(std::min(slowStartEnd, shift - 1));
+            if (slowStartEnd >= shift) {
+                total += rate * (sumFromOneThrough(slowStartEnd + 1) - sumFromOneThrough(shift));
+            }
+        }
+
+        // After the slow start the subsidy only changes at a halving or a spacing era,
+        // so sum constant runs.
+        int block = std::max<int>(interval, 1);
+        while (block <= nHeight) {
+            const CAmount subsidy = GetBlockSubsidy(block);
+            if (subsidy == 0) {
+                break;
+            }
+            const auto boundary = NextSubsidyBoundary(*this, block);
+            const int runEnd = boundary.has_value() ? std::min(*boundary - 1, nHeight) : nHeight;
+            total += CAmount(runEnd - block + 1) * subsidy;
+            assert(total >= 0);
+            if (runEnd == nHeight) {
+                break;
+            }
+            block = runEnd + 1;
+        }
+        return total;
+    }
+
+    std::optional<int> Params::NSMReissuanceHeight() const {
+        const auto nu7Activation = GetActivationHeight(Consensus::UPGRADE_NU7);
+        if (!nu7Activation.has_value()) {
+            return std::nullopt;
+        }
+        if (nTestNSMReissuanceHeight.has_value()) {
+            return std::max(*nTestNSMReissuanceHeight, *nu7Activation);
+        }
+        const auto thirdHalving = HeightForHalving(3);
+        if (!thirdHalving.has_value() || *thirdHalving == std::numeric_limits<int>::max()) {
+            return std::nullopt;
+        }
+        const auto fourthHalving = HeightForHalving(4);
+        const int runEnd = fourthHalving.has_value() ? *fourthHalving - 1 : std::numeric_limits<int>::max();
+        const int first = std::max(*thirdHalving + 1, *nu7Activation);
+        if (first > runEnd) {
+            return std::nullopt;
+        }
+
+        // The subsidy is constant on [first, runEnd], so solve for the first crossing:
+        // ceil(fraction * reserve) < subsidy exactly when reserve <= maxReserve.
+        const CAmount subsidy = GetBlockSubsidy(first);
+        if (subsidy == 0) {
+            return std::nullopt;
+        }
+        const uint64_t maxReserve =
+            (uint64_t(subsidy) - 1) * NSM_BLOCK_SUBSIDY_FRACTION_DENOMINATOR / NSM_BLOCK_SUBSIDY_FRACTION_NUMERATOR;
+        const CAmount supplyBeforeFirst = ScheduledIssuance(first - 1);
+        const uint64_t reserve = MAX_MONEY > supplyBeforeFirst ? uint64_t(MAX_MONEY - supplyBeforeFirst) : 0;
+        const uint64_t excess = reserve > maxReserve ? reserve - maxReserve : 0;
+        const uint64_t blocksUntilCrossing = (excess + uint64_t(subsidy) - 1) / uint64_t(subsidy);
+        const uint64_t crossing = uint64_t(first) + blocksUntilCrossing;
+        if (crossing > uint64_t(runEnd)) {
+            return std::nullopt;
+        }
+        return int(crossing);
+    }
+
+    bool Params::IsNSMReissuanceActive(int nHeight) const {
+        // Reissuance never starts before NU7, so skip deriving the height for older blocks.
+        if (!NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+            return false;
+        }
+        const auto start = NSMReissuanceHeight();
+        return start.has_value() && nHeight >= *start;
+    }
+
+    CAmount Params::AdditionalBlockSubsidy(int nHeight, CAmount parentNSMValueBalance) const {
+        if (!IsNSMReissuanceActive(nHeight)) {
+            return 0;
+        }
+        assert(MoneyRange(parentNSMValueBalance));
+        // MAX_MONEY * 1375 fits in an int64_t, so this ceiling division cannot overflow.
+        return (parentNSMValueBalance * NSM_BLOCK_SUBSIDY_FRACTION_NUMERATOR + NSM_BLOCK_SUBSIDY_FRACTION_DENOMINATOR - 1)
+            / NSM_BLOCK_SUBSIDY_FRACTION_DENOMINATOR;
     }
 
     std::vector<std::pair<FSInfo, FundingStream>> Params::GetActiveFundingStreams(int nHeight) const
@@ -480,16 +659,33 @@ namespace Consensus {
     };
 
     int64_t Params::PoWTargetSpacing(int nHeight) const {
-        // zip208
+        // zip208, zip218
         // PoWTargetSpacing(height) :=
         // PreBlossomPoWTargetSpacing, if not IsBlossomActivated(height)
-        // PostBlossomPoWTargetSpacing, otherwise.
+        // PostBlossomPoWTargetSpacing, if IsBlossomActivated(height) and not IsNU7Activated(height)
+        // PostNU7PoWTargetSpacing, otherwise.
+        if (NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)) {
+            return nPostNU7PowTargetSpacing;
+        }
         bool blossomActive = NetworkUpgradeActive(nHeight, Consensus::UPGRADE_BLOSSOM);
         return blossomActive ? nPostBlossomPowTargetSpacing : nPreBlossomPowTargetSpacing;
     }
 
+    int64_t Params::PoWAveragingWindow(int nHeight) const {
+        return NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)
+            ? nPostNU7PowAveragingWindow
+            : nPowAveragingWindow;
+    }
+
     int64_t Params::AveragingWindowTimespan(int nHeight) const {
-        return nPowAveragingWindow * PoWTargetSpacing(nHeight);
+        return PoWAveragingWindow(nHeight) * PoWTargetSpacing(nHeight);
+    }
+
+    int64_t Params::MinDifficultyGap(int nHeight) const {
+        const int spacings = NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU7)
+            ? POST_NU7_MIN_DIFFICULTY_GAP_SPACINGS
+            : PRE_NU7_MIN_DIFFICULTY_GAP_SPACINGS;
+        return PoWTargetSpacing(nHeight) * spacings;
     }
 
     int64_t Params::MinActualTimespan(int nHeight) const {
@@ -498,5 +694,15 @@ namespace Consensus {
 
     int64_t Params::MaxActualTimespan(int nHeight) const {
         return (AveragingWindowTimespan(nHeight) * (100 + nPowMaxAdjustDown)) / 100;
+    }
+
+    int NU7AdjustedFundingStreamHeight(int height, std::optional<int> nu7Activation) {
+        if (!nu7Activation.has_value() || *nu7Activation >= height) {
+            return height;
+        }
+        const int64_t moved = *nu7Activation
+            + int64_t(Consensus::NU7_POW_TARGET_SPACING_RATIO) * (height - *nu7Activation);
+        assert(moved <= std::numeric_limits<int>::max());
+        return (int) moved;
     }
 }

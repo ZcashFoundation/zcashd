@@ -58,10 +58,12 @@ fn dispatch<S, T>(
         BranchId::Sprout
         | BranchId::Overwinter
         | BranchId::Sapling
+        | BranchId::Blossom
         | BranchId::Heartwood
         | BranchId::Canopy => v1(input),
         BranchId::Nu5 | BranchId::Nu6 | BranchId::Nu6_1 | BranchId::Nu6_2 => v2(input),
-        _ => v3(input),
+        // Listed explicitly so that a new upgrade must choose its node format.
+        BranchId::Nu6_3 | BranchId::Nu7 => v3(input),
     }
 }
 
@@ -248,4 +250,15 @@ fn hash_node_inner<V: Version>(
         .map_err(|e| format!("Invalid node encoding: {}", e))?;
 
     Ok(V::hash(&node))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dispatch;
+
+    /// NU7 adds no shielded pool, so its history nodes keep the V3 (Ironwood) format.
+    #[test]
+    fn nu7_history_nodes_use_v3() {
+        assert_eq!(dispatch(0x7719_0ad9, (), |_| 1, |_| 2, |_| 3), 3);
+    }
 }

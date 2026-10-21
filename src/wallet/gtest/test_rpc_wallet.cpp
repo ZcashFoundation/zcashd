@@ -113,6 +113,26 @@ public:
     ScopedNU6point3Wallet& operator=(const ScopedNU6point3Wallet&) = delete;
 };
 
+/** Activates every upgrade through NU7 on regtest and loads the global wallet, for a test's scope. */
+class ScopedNU7Wallet
+{
+public:
+    ScopedNU7Wallet()
+    {
+        RegtestActivateNU7();
+        LoadGlobalWallet();
+    }
+
+    ~ScopedNU7Wallet()
+    {
+        RegtestDeactivateNU7();
+        UnloadGlobalWallet();
+    }
+
+    ScopedNU7Wallet(const ScopedNU7Wallet&) = delete;
+    ScopedNU7Wallet& operator=(const ScopedNU7Wallet&) = delete;
+};
+
 /// Expects that the fee calculated during transaction construction matches the fee used by block
 /// construction. It allows the fee included in the transaction to be `MARGINAL_FEE` higher than the
 /// fee expected by block construction.
@@ -333,6 +353,72 @@ TEST(WalletRPCTests, PrepareTransactionAvoidsOrchardAfterNU6point3)
         EXPECT_EQ(unifiedEffects->GetSpendable().GetOrchardTotal(), 0);
         EXPECT_TRUE(unifiedEffects->GetPayments().HasSaplingRecipient());
         EXPECT_FALSE(unifiedEffects->GetPayments().HasOrchardRecipient());
+    }
+}
+
+TEST(WalletRPCTests, PrepareTransactionSaplingLimitAfterNU7)
+{
+    ScopedNU7Wallet wallet;
+
+    {
+        LOCK2(cs_main, pwalletMain->cs_wallet);
+
+        if (!pwalletMain->HaveMnemonicSeed()) {
+            pwalletMain->GenerateNewSeed();
+        }
+
+        CBlock block;
+        block.hashMerkleRoot = BlockMerkleRoot(block);
+        ScopedFakeChainTip fakeTip(block);
+
+        auto [ufvk, accountId] = pwalletMain->GenerateNewUnifiedSpendingKey();
+        auto selector = pwalletMain->ZTXOSelectorForAccount(
+                accountId,
+                true,
+                TransparentCoinbasePolicy::Disallow).value();
+        auto sourceAddress = ufvk.GetSaplingKey().value().FindAddress(diversifier_index_t{0}).first;
+        SpendableInputs inputs;
+        inputs.saplingNoteEntries.push_back(SaplingNoteEntry{
+            SaplingOutPoint{},
+            sourceAddress,
+            SaplingNote(sourceAddress, 10 * COIN, Zip212Enabled::AfterZip212),
+            {},
+            100});
+
+        // Distinct recipients, at the diversified addresses of another account.
+        auto [recipientUfvk, recipientAccountId] = pwalletMain->GenerateNewUnifiedSpendingKey();
+        auto recipientKey = recipientUfvk.GetSaplingKey().value();
+        std::vector<Payment> payments;
+        diversifier_index_t j{0};
+        while (payments.size() < 299) {
+            auto [address, index] = recipientKey.FindAddress(j);
+            payments.emplace_back(address, 10000, std::nullopt);
+            j = index;
+            ASSERT_TRUE(j.increment());
+        }
+
+        WalletTxBuilder builder(Params(), minRelayTxFee);
+        auto prepare = [&](size_t recipients) {
+            return builder.PrepareTransaction(
+                    *pwalletMain,
+                    selector,
+                    inputs,
+                    std::vector<Payment>(payments.begin(), payments.begin() + recipients),
+                    chainActive,
+                    TransactionStrategy(PrivacyPolicy::FullPrivacy),
+                    std::nullopt,
+                    1);
+        };
+
+        // The spend, 298 payments and the Sapling change are the 300 a block may hold.
+        EXPECT_TRUE(prepare(298).has_value());
+
+        auto tooMany = prepare(299);
+        ASSERT_FALSE(tooMany.has_value());
+        const auto* error = std::get_if<ExcessShieldedActionsError>(&tooMany.error());
+        ASSERT_NE(error, nullptr);
+        EXPECT_EQ(error->saplingIOs, 301);
+        EXPECT_EQ(error->limit, SAPLING_BLOCK_IO_LIMIT);
     }
 }
 

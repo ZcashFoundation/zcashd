@@ -142,21 +142,28 @@ int EstimateNetHeight(const Consensus::Params& params, int currentHeadersHeight,
         return currentHeadersHeight;
     }
 
-    int estimatedHeight = currentHeadersHeight + (now - currentHeadersTime) / params.PoWTargetSpacing(currentHeadersHeight);
-
-    int blossomActivationHeight = params.vUpgrades[Consensus::UPGRADE_BLOSSOM].nActivationHeight;
-    if (currentHeadersHeight >= blossomActivationHeight || estimatedHeight <= blossomActivationHeight) {
-        return ((estimatedHeight + 5) / 10) * 10;
+    // Walk forward through each target spacing era still ahead (Blossom and NU7 change the
+    // spacing), then estimate within the era the network is in now.
+    int height = currentHeadersHeight;
+    int64_t time = currentHeadersTime;
+    for (auto idx : {Consensus::UPGRADE_BLOSSOM, Consensus::UPGRADE_NU7}) {
+        const auto activationHeight = params.GetActivationHeight(idx);
+        if (!activationHeight.has_value() || activationHeight.value() <= height) {
+            continue;
+        }
+        // Blocks height + 1 to A - 1 have the current spacing, and block A the new one.
+        const int64_t activationTime = time +
+            int64_t(activationHeight.value() - height - 1) * params.PoWTargetSpacing(height) +
+            params.PoWTargetSpacing(activationHeight.value());
+        // A block due exactly now counts, as it did before NU7.
+        if (activationTime > now) {
+            break;
+        }
+        height = activationHeight.value();
+        time = activationTime;
     }
 
-    int numPreBlossomBlocks = blossomActivationHeight - currentHeadersHeight;
-    int64_t preBlossomTime = numPreBlossomBlocks * params.PoWTargetSpacing(blossomActivationHeight - 1);
-    int64_t blossomActivationTime = currentHeadersTime + preBlossomTime;
-    if (blossomActivationTime >= now) {
-        return blossomActivationHeight;
-    }
-
-    int netheight =  blossomActivationHeight + (now - blossomActivationTime) / params.PoWTargetSpacing(blossomActivationHeight);
+    int netheight = height + (now - time) / params.PoWTargetSpacing(height);
     return ((netheight + 5) / 10) * 10;
 }
 

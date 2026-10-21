@@ -57,7 +57,7 @@ int64_t GetNetworkHashPS(int lookup, int height) {
 
     // If lookup is nonpositive, then use difficulty averaging window.
     if (lookup <= 0)
-        lookup = Params().GetConsensus().nPowAveragingWindow;
+        lookup = Params().GetConsensus().PoWAveragingWindow(pb->nHeight);
 
     // If lookup is larger than chain, then set it to chain length.
     if (lookup > pb->nHeight)
@@ -639,10 +639,13 @@ UniValue getblocktemplate(const UniValue& params, bool fHelp)
                 // Note that the time to create the coinbase tx here does not add to,
                 // but instead is included in, the 10 second delay, since we're waiting
                 // until an absolute time is reached.
-                if (!cached_next_cb_mtx && IsShieldedMinerAddress(minerAddress)) {
+                // Once ZIP 237 reissuance is active the coinbase depends on the NSM value
+                // balance after the next block, so it cannot be built in advance.
+                if (!cached_next_cb_mtx && IsShieldedMinerAddress(minerAddress) &&
+                    !Params().GetConsensus().IsNSMReissuanceActive(nHeight + 2)) {
                     cached_next_cb_height = nHeight + 2;
                     cached_next_cb_mtx = CreateCoinbaseTransaction(
-                        Params(), CAmount{0}, minerAddress, cached_next_cb_height);
+                        Params(), CAmount{0}, CAmount{0}, minerAddress, cached_next_cb_height);
                     next_cb_mtx = cached_next_cb_mtx;
                 }
                 bool timedout = g_best_block_cv.wait_until(lock, checktxtime) == std::cv_status::timeout;
@@ -922,11 +925,11 @@ UniValue getblocksubsidy(const UniValue& params, bool fHelp)
             "1. height         (numeric, optional) The block height.  If not provided, defaults to the current height of the chain.\n"
             "\nResult:\n"
             "{\n"
-            "  \"miner\" : x.xxx,              (numeric) The mining reward amount in " + CURRENCY_UNIT + ".\n"
+            "  \"miner\" : x.xxx,              (numeric) The mining reward amount in " + CURRENCY_UNIT + ", including any ZIP 237 NSM reissuance.\n"
             "  \"founders\" : x.xxx,           (numeric) The founders' reward amount in " + CURRENCY_UNIT + ".\n"
             "  \"fundingstreamstotal\" : x.xxx,(numeric) The total value of direct funding streams in " + CURRENCY_UNIT + ".\n"
             "  \"lockboxtotal\" : x.xxx,       (numeric) The total value sent to development funding lockboxes in " + CURRENCY_UNIT + ".\n"
-            "  \"totalblocksubsidy\" : x.xxx,  (numeric) The total value of the block subsidy in " + CURRENCY_UNIT + ".\n"
+            "  \"totalblocksubsidy\" : x.xxx,  (numeric) The total value of the block subsidy in " + CURRENCY_UNIT + ", including any ZIP 237 NSM reissuance.\n"
             "  \"fundingstreams\" : [          (array) An array of funding stream descriptions (present only when funding streams are active).\n"
             "    {\n"
             "      \"recipient\" : \"...\",        (string) A description of the funding stream recipient.\n"
@@ -1016,6 +1019,22 @@ UniValue getblocksubsidy(const UniValue& params, bool fHelp)
         nFoundersReward = nBlockSubsidy/5;
     }
     CAmount nMinerReward = nBlockSubsidy - nFoundersReward - nFundingStreamsTotal - nLockboxTotal;
+
+    // ZIP 237: once reissuance is active, the miner is also paid part of the NSM value
+    // balance after the parent block, so (as in Zakura) the parent must be in the active chain.
+    if (consensus.IsNSMReissuanceActive(nHeight)) {
+        const CBlockIndex* parent = chainActive[nHeight - 1];
+        if (parent == nullptr || !parent->nChainNSMValueBalance.has_value()) {
+            throw JSONRPCError(RPC_MISC_ERROR,
+                "The NSM reissuance subsidy needs the parent block, which is not in the active chain; "
+                "heights can be at most one block above the chain tip");
+        }
+        const CAmount nAdditionalSubsidy =
+            consensus.AdditionalBlockSubsidy(nHeight, parent->nChainNSMValueBalance.value());
+        nMinerReward += nAdditionalSubsidy;
+        nBlockSubsidy += nAdditionalSubsidy;
+    }
+
     result.pushKV("miner", ValueFromAmount(nMinerReward));
     result.pushKV("founders", ValueFromAmount(nFoundersReward));
     result.pushKV("fundingstreamstotal", ValueFromAmount(nFundingStreamsTotal));

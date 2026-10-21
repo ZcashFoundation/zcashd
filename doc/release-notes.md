@@ -4,6 +4,125 @@ release-notes at release time)
 Notable changes
 ===============
 
+NU7 consensus support
+---------------------
+
+This release adds consensus support for the NU7 network upgrade (the ZIP 259
+set, consensus branch ID `0x77190ad9`). NU7 activated on Testnet at height
+4,465,026 on 2026-10-04, and zebra-compat-v1.2.0 and earlier sidecars cannot
+follow Testnet past that height. Mainnet NU7 is scheduled at height 3,543,405,
+matching Zebra's Mainnet schedule. Upgrade before that height to keep following
+Mainnet.
+
+Run this release behind Zebra 7.0.0 or later. From NU7 activation, Zebra and
+the sidecar each disconnect a peer that advertises an older protocol version,
+so both must be upgraded.
+
+From NU7:
+
+- **25-second blocks (ZIP 218).** The target spacing drops from 75 to 25
+  seconds and the difficulty averaging window grows from 17 to 102 blocks. The
+  halving interval triples and the block subsidy is divided by 3, so issuance
+  per unit of time is unchanged, and the funding streams and lockbox follow the
+  new schedule.
+- **Per-block shielded limits (ZIP 218).** A block holds at most 330 Orchard
+  actions, 330 Ironwood actions and 300 Sapling spends and outputs, within a
+  combined budget of 330, and no Sprout JoinSplits.
+- **Fee burning (ZIP 235).** 60% of each block's transaction fees are burned:
+  the coinbase may claim only `F - floor(6F/10)` of the block's fees `F`.
+- **Network Sustainability Mechanism (ZIP 237).** Burned fees are added to the
+  NSM balance, which is paid back out to miners gradually from the reissuance
+  height. `getblockchaininfo` reports it as `nsmValueBalanceZat`.
+- **No v4 transactions (ZIP 2003).** v4 transactions, coinbase included, are
+  invalid.
+
+The protocol version is now 170190, the Mainnet NU7 version. The Rust crates
+are Zakura Common 2.2.0, Zakura's forks of the Zcash protocol and cryptography
+crates. A CI job checks zcashd's NU7 consensus values against Zakura's.
+
+Action required for Sprout users BEFORE NU7 activation
+------------------------------------------------------
+
+- **Sprout funds become permanently unspendable at NU7.** ZIP 2003 makes v4
+  transactions, the only ones that can spend Sprout notes, invalid. Move any
+  Sprout funds to a Sapling or transparent address well before the activation
+  height, with `z_sendmany` or the Sprout-to-Sapling migration
+  (`z_setmigration`).
+- **Do not rely on the migration's last rounds.** The migration stops creating
+  transactions a few blocks before NU7, and skips any round whose transactions
+  could still be unmined when NU7 activates.
+
+Wallet changes from NU7
+-----------------------
+
+- Wallet transactions are v5, even with `-preferredtxversion=4`.
+- The default expiry delta becomes 120 blocks, the same time as 40 blocks at
+  the old spacing. `-txexpirydelta` still overrides it.
+- Sprout spends and the Sprout-to-Sapling migration are refused with an error.
+- A transaction with more than 300 Sapling spends and outputs is refused,
+  because no block could hold it.
+
+Deeper reorgs: wallet and pruning impact
+----------------------------------------
+
+Since zebra-compat-v1.2.0, zcashd accepts reorgs of up to 1000 blocks
+(previously 99), matching Zebra's `MAX_BLOCK_REORG_HEIGHT`, so the sidecar
+follows every reorg Zebra does. This has costs for wallets and pruned nodes:
+
+- **Larger wallets.** The wallet keeps 1001 cached witnesses for each unspent
+  Sprout or Sapling note (previously 100), about 10 times the memory and disk
+  per note, and its Orchard note commitment tree keeps 1001 checkpoints. Since
+  anyone who knows a Sapling address can send it notes, a wallet sent many small
+  "dust" notes grows accordingly: at least about 600 MiB per ZEC the sender
+  spends on fees.
+- **One-way wallet upgrade.** zebra-compat-v1.1.0 and earlier abort on a
+  wallet written by zebra-compat-v1.2.0 or later, once one of its notes has
+  more than 100 cached witnesses. This corrects the zebra-compat-v1.2.0 release
+  notes, which said that downgrading still worked. Back up `wallet.dat` before
+  upgrading from zebra-compat-v1.1.0 or earlier.
+- **Reorg tolerance builds up after upgrading.** A wallet upgraded from
+  zebra-compat-v1.1.0 or earlier starts with only the last 100 blocks of
+  history and reaches the full 1000 over the next 900 or so blocks. A reorg as
+  deep as its history or deeper, in that window, stops the node; restart with
+  `-rescan`.
+- **Pruned nodes keep more blocks.** A pruned node keeps the last 1001 blocks
+  (previously 288). With large blocks this can exceed the 550 MiB minimum
+  `-prune` target, so allow at least 2 GiB. A recently upgraded pruned node has
+  already pruned older blocks, so it cannot follow a reorg deeper than the
+  blocks it has kept until it holds 1001 again.
+
+Mempool around network upgrades
+-------------------------------
+
+Zebra penalizes a peer that relays a transaction it rejects (it bans the peer
+once its misbehavior score reaches 100), and Zebra may be a few blocks ahead of
+the sidecar. The mempool therefore also checks each transaction at the highest
+height Zebra could check it at (3 blocks past the next block, or past the block
+after Zebra's best header), and drops any it holds that are no longer valid
+there.
+
+So in the last few blocks before an upgrade activates, the mempool refuses new
+transactions with `tx-invalid-at-relay-height`, and drops the ones it holds.
+From activation, it accepts transactions for the new upgrade. From NU7 it also
+refuses any transaction that exceeds a ZIP 218 per-block limit.
+
+Mining
+------
+
+Block templates follow the ZIP 218 per-block limits, the ZIP 235 fee split and
+ZIP 237 reissuance, and `getblocksubsidy` reports the NU7 amounts. Once
+reissuance is active, `getblocktemplate` no longer builds the next block's
+coinbase in advance, since it depends on that block's NSM balance.
+
+Other fixes
+-----------
+
+- v6 transactions are standard from NU6.3. Previously the mempool rejected
+  every v6 transaction relayed to it as `nu5-version`.
+- Fixed a sync stall: when Zebra stopped answering a `getdata` at its 1 MB
+  limit, the sidecar waited for the download timeout on each remaining block,
+  and each wait was longer than the last.
+
 NU6.3 (Ironwood) consensus support; no wallet support, ever
 -----------------------------------------------------------
 
@@ -78,35 +197,3 @@ Valargroup reserves the right to announce a future End of Life through a Zakura
 compatibility release. Integrators are encouraged to migrate to
 [Zakura](https://github.com/zakura-core/zakura) and monitor its
 [CHANGELOG](https://github.com/zakura-core/zakura/blob/main/CHANGELOG.md).
-
-
-Maximum reorg length raised to 1000 blocks
-------------------------------------------
-
-`zcashd` now accepts chain reorganizations up to 1000 blocks deep, instead of 99.
-This matches Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`), so a
-`zcashd` node no longer shuts itself down on a reorg that Zebra survives. The
-node still shuts down with the same message for reorgs deeper than the new
-limit.
-
-Three limits were raised together, since the node threshold cannot move on its
-own:
-
-- `MAX_REORG_LENGTH` is now 1000, and is no longer derived from the
-  consensus-critical `COINBASE_MATURITY`, which is unchanged.
-- The wallet's Sprout and Sapling witness cache (`WITNESS_CACHE_SIZE`) follows
-  it to 1001 entries.
-- The wallet's Orchard note commitment tree now retains 1001 checkpoints, and
-  existing `wallet.dat` files are upgraded to the new checkpoint depth on load.
-  The wallet serialization format is unchanged, so downgrading is still
-  possible; a downgraded node will simply go back to retaining 100 checkpoints.
-
-`MIN_BLOCKS_TO_KEEP` was raised to 1001 to match, so that a pruned node can
-still perform a reorg of the maximum accepted length. The default for
-`-checkblocks` is pinned at 288 and so is unaffected.
-
-Wallets holding shielded notes should expect witness cache memory and
-`wallet.dat` size to grow by roughly 10x, since one witness per block is
-retained for each tracked note. The growth is gradual: the cache grows by one
-entry per connected block, so an upgraded wallet takes around 900 blocks to
-reach the new ceiling.

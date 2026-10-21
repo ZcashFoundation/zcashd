@@ -60,8 +60,15 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason, const CChainParam
     bool overwinterActive = chainparams.GetConsensus().NetworkUpgradeActive(nHeight,  Consensus::UPGRADE_OVERWINTER);
     bool saplingActive = chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_SAPLING);
     bool nu5Active = chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU5);
+    bool nu6point3Active = chainparams.GetConsensus().NetworkUpgradeActive(nHeight, Consensus::UPGRADE_NU6_3);
 
-    if (nu5Active) {
+    if (nu6point3Active) {
+        // NU6.3 standard rules apply: v6 (ZIP 248) transactions are valid from NU6.3.
+        if (tx.nVersion > CTransaction::NU6_3_MAX_CURRENT_VERSION || tx.nVersion < CTransaction::NU6_3_MIN_CURRENT_VERSION) {
+            reason = "nu6.3-version";
+            return false;
+        }
+    } else if (nu5Active) {
         // NU5 standard rules apply
         if (tx.nVersion > CTransaction::NU5_MAX_CURRENT_VERSION || tx.nVersion < CTransaction::NU5_MIN_CURRENT_VERSION) {
             reason = "nu5-version";

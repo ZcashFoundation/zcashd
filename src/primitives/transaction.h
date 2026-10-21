@@ -17,6 +17,8 @@
 #include "consensus/upgrades.h"
 
 #include <array>
+#include <optional>
+#include <string>
 #include <variant>
 
 #include "zcash/NoteEncryption.hpp"
@@ -495,6 +497,8 @@ public:
     static const int32_t SAPLING_MAX_CURRENT_VERSION = 4;
     static const int32_t NU5_MIN_CURRENT_VERSION = 4;
     static const int32_t NU5_MAX_CURRENT_VERSION = 5;
+    static const int32_t NU6_3_MIN_CURRENT_VERSION = 4;
+    static const int32_t NU6_3_MAX_CURRENT_VERSION = 6;
 
     static_assert(SPROUT_MIN_CURRENT_VERSION >= SPROUT_MIN_TX_VERSION,
                   "standard rule for tx version should be consistent with network rule");
@@ -518,6 +522,10 @@ public:
 
     static_assert( (NU5_MAX_CURRENT_VERSION <= ZIP225_MAX_TX_VERSION &&
                     NU5_MAX_CURRENT_VERSION >= NU5_MIN_CURRENT_VERSION),
+                  "standard rule for tx version should be consistent with network rule");
+
+    static_assert( (NU6_3_MAX_CURRENT_VERSION <= ZIP248_MAX_TX_VERSION &&
+                    NU6_3_MAX_CURRENT_VERSION >= NU6_3_MIN_CURRENT_VERSION),
                   "standard rule for tx version should be consistent with network rule");
 
     // The local variables are made const to prevent unintended modification
@@ -956,6 +964,25 @@ struct CMutableTransaction
      * For v1-v4 transactions, this returns the null hash (i.e. all-zeroes).
      */
     uint256 GetAuthDigest() const;
+};
+
+/** The counts that the ZIP 218 per-block shielded limits apply to, for a transaction or a block. */
+struct ShieldedActionCounts {
+    uint64_t orchardActions{0};
+    uint64_t ironwoodActions{0};
+    uint64_t saplingIOs{0};
+    uint64_t sproutJoinSplits{0};
+
+    ShieldedActionCounts() {}
+    explicit ShieldedActionCounts(const CTransaction& tx);
+
+    ShieldedActionCounts& operator+=(const ShieldedActionCounts& other);
+
+    /** The ZIP 218 shielded cost: Orchard and Ironwood actions, Sapling spends and outputs, and twice the JoinSplits. */
+    uint64_t Cost() const;
+
+    /** The reject reason for the first ZIP 218 per-block limit these counts exceed, if any. */
+    std::optional<std::string> ExceededLimit() const;
 };
 
 #endif // BITCOIN_PRIMITIVES_TRANSACTION_H

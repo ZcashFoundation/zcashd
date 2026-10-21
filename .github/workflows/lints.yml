@@ -62,6 +62,10 @@ jobs:
         run: ./test/lint/lint-whitespace.sh
         if: always()
 
+      - name: zcashd compat packaging
+        run: ./zcutil/test-zcashd-compat-packaging.sh
+        if: always()
+
   hadolint:
     name: Hadolint
     runs-on: ubuntu-latest
